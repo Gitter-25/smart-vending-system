@@ -135,9 +135,6 @@ export default function Transactions() {
     (transaction) => transaction.status === "Failed"
   );
 
-  const pendingTransactions = transactions.filter(
-    (transaction) => transaction.status === "Pending"
-  );
 
   const totalSales = successfulTransactions.reduce(
     (total, transaction) => total + transaction.amount,
