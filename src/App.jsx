@@ -1,5 +1,10 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import {
+  Navigate,
+  Route,
+  Routes,
+} from "react-router-dom";
 
+import ProtectedRoute from "./components/ProtectedRoute";
 import AdminLayout from "./layouts/AdminLayout";
 
 import Dashboard from "./pages/admin/Dashboard";
@@ -15,21 +20,67 @@ import Login from "./pages/auth/Login";
 export default function App() {
   return (
     <Routes>
+      {/* Public route */}
       <Route path="/login" element={<Login />} />
 
-      <Route element={<AdminLayout />}>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/products" element={<Products />} />
-        <Route path="/inventory" element={<Inventory />} />
-        <Route path="/students" element={<Students />} />
-        <Route path="/transactions" element={<Transactions />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/machine" element={<Machine />} />
-        <Route path="/settings" element={<Settings />} />
+      {/* Protected admin routes */}
+      <Route element={<ProtectedRoute />}>
+        <Route element={<AdminLayout />}>
+          <Route
+            path="/dashboard"
+            element={<Dashboard />}
+          />
+
+          <Route
+            path="/products"
+            element={<Products />}
+          />
+
+          <Route
+            path="/inventory"
+            element={<Inventory />}
+          />
+
+          <Route
+            path="/students"
+            element={<Students />}
+          />
+
+          <Route
+            path="/transactions"
+            element={<Transactions />}
+          />
+
+          <Route
+            path="/reports"
+            element={<Reports />}
+          />
+
+          <Route
+            path="/machine"
+            element={<Machine />}
+          />
+
+          <Route
+            path="/settings"
+            element={<Settings />}
+          />
+        </Route>
       </Route>
 
-      <Route path="/" element={<Navigate to="/login" replace />} />
-      <Route path="*" element={<Navigate to="/login" replace />} />
+      <Route
+        path="/"
+        element={
+          <Navigate to="/dashboard" replace />
+        }
+      />
+
+      <Route
+        path="*"
+        element={
+          <Navigate to="/dashboard" replace />
+        }
+      />
     </Routes>
   );
 }

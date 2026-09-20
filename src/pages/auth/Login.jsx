@@ -1,6 +1,14 @@
-import { Eye, EyeOff, LockKeyhole, Mail, ShoppingBag } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  LockKeyhole,
+  Mail,
+  ShoppingBag,
+} from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../../lib/supabase";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -10,19 +18,76 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    setError("");
+  const handleSubmit = async (event) => {
+  event.preventDefault();
+  setError("");
 
-    if (!email.trim() || !password.trim()) {
-      setError("Please enter your email and password.");
+  const cleanEmail = email.trim();
+
+  if (!cleanEmail || !password) {
+    setError("Please enter your email and password.");
+    return;
+  }
+
+  try {
+    setLoading(true);
+
+    // Step 1: Authenticate with Supabase
+    const {
+      data: authData,
+      error: signInError,
+    } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (signInError || !authData.user) {
+      setError("Invalid email or password.");
       return;
     }
 
-    // Temporary login while Supabase authentication is not connected.
-    navigate("/dashboard");
-  };
+    // Step 2: Verify that the user is an active administrator
+    const {
+      data: adminProfile,
+      error: adminError,
+    } = await supabase
+      .from("admin_profiles")
+      .select("id, role, status")
+      .eq("id", authData.user.id)
+      .eq("role", "admin")
+      .eq("status", "active")
+      .maybeSingle();
+
+    // Step 3: Reject authenticated users without admin access
+    if (adminError || !adminProfile) {
+      await supabase.auth.signOut();
+
+      setError(
+        "Administrator access is required."
+      );
+
+      return;
+    }
+
+    // Step 4: Authorized administrator
+    navigate("/dashboard", {
+      replace: true,
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+
+    // Avoid leaving a partial session behind
+    await supabase.auth.signOut();
+
+    setError(
+      "Unable to sign in right now. Please try again."
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -34,7 +99,10 @@ export default function Login() {
           </div>
 
           <div>
-            <p className="text-xl font-bold">SmartVend</p>
+            <p className="text-xl font-bold">
+              SmartVend
+            </p>
+
             <p className="text-sm text-slate-400">
               Smart Vending Management System
             </p>
@@ -51,8 +119,9 @@ export default function Login() {
           </h1>
 
           <p className="mt-6 text-lg leading-8 text-slate-400">
-            Monitor products, inventory, student ID transactions, sales,
-            and machine activity through a centralized administration
+            Monitor products, inventory, student ID
+            transactions, sales, and machine activity
+            through a centralized administration
             dashboard.
           </p>
         </div>
@@ -71,7 +140,9 @@ export default function Login() {
               <ShoppingBag size={20} />
             </div>
 
-            <p className="text-xl font-bold text-slate-900">SmartVend</p>
+            <p className="text-xl font-bold text-slate-900">
+              SmartVend
+            </p>
           </div>
 
           <div className="mb-8">
@@ -80,11 +151,15 @@ export default function Login() {
             </h2>
 
             <p className="mt-2 text-slate-500">
-              Sign in to access the vending machine dashboard.
+              Sign in to access the vending machine
+              dashboard.
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-5"
+          >
             {/* Email */}
             <div>
               <label
@@ -104,10 +179,13 @@ export default function Login() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  onChange={(event) =>
+                    setEmail(event.target.value)
+                  }
                   placeholder="admin@example.com"
                   autoComplete="email"
-                  className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-4 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-4 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                 />
               </div>
             </div>
@@ -129,21 +207,41 @@ export default function Login() {
 
                 <input
                   id="password"
-                  type={showPassword ? "text" : "password"}
+                  type={
+                    showPassword
+                      ? "text"
+                      : "password"
+                  }
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
+                  onChange={(event) =>
+                    setPassword(event.target.value)
+                  }
                   placeholder="Enter your password"
                   autoComplete="current-password"
-                  className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-12 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-12 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                 />
 
                 <button
                   type="button"
-                  onClick={() => setShowPassword((current) => !current)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-700"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() =>
+                    setShowPassword(
+                      (current) => !current
+                    )
+                  }
+                  disabled={loading}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-700 disabled:cursor-not-allowed"
+                  aria-label={
+                    showPassword
+                      ? "Hide password"
+                      : "Show password"
+                  }
                 >
-                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                  {showPassword ? (
+                    <EyeOff size={19} />
+                  ) : (
+                    <Eye size={19} />
+                  )}
                 </button>
               </div>
             </div>
@@ -153,9 +251,15 @@ export default function Login() {
               <input
                 type="checkbox"
                 checked={rememberMe}
-                onChange={(event) => setRememberMe(event.target.checked)}
+                onChange={(event) =>
+                  setRememberMe(
+                    event.target.checked
+                  )
+                }
+                disabled={loading}
                 className="h-4 w-4 rounded border-slate-300 accent-blue-600"
               />
+
               Remember me
             </label>
 
@@ -171,9 +275,19 @@ export default function Login() {
 
             <button
               type="submit"
-              className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-blue-400"
             >
-              Sign in
+              {loading && (
+                <Loader2
+                  size={18}
+                  className="animate-spin"
+                />
+              )}
+
+              {loading
+                ? "Signing in..."
+                : "Sign in"}
             </button>
           </form>
 

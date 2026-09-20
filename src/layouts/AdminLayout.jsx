@@ -11,6 +11,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabase";
 
 const navigation = [
   { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
@@ -26,9 +27,21 @@ const navigation = [
 export default function AdminLayout() {
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    navigate("/login");
-  };
+  const handleLogout = async () => {
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    console.error(
+      "Unable to sign out:",
+      error.message
+    );
+    return;
+  }
+
+  navigate("/login", {
+    replace: true,
+  });
+};
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -73,6 +86,7 @@ export default function AdminLayout() {
         {/* Logout */}
         <div className="border-t border-slate-800 p-3">
           <button
+           type="button"
             onClick={handleLogout}
             className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-white"
           >
