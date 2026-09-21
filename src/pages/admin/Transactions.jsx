@@ -4,142 +4,320 @@ import {
   CreditCard,
   Eye,
   Package,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   X,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 
-const initialTransactions = [
-  {
-    id: 1,
-    transactionId: "TXN-000001",
-    studentNumber: "2026-0001",
-    studentName: "Juan Dela Cruz",
-    product: "Bottled Water",
-    slot: "A1",
-    amount: 20,
-    paymentMethod: "Student ID",
-    status: "Success",
-    date: "Sep 20, 2026",
-    time: "10:24 PM",
-  },
-  {
-    id: 2,
-    transactionId: "TXN-000002",
-    studentNumber: "2026-0002",
-    studentName: "Maria Santos",
-    product: "Chocolate Bar",
-    slot: "A3",
-    amount: 35.5,
-    paymentMethod: "Student ID",
-    status: "Success",
-    date: "Sep 20, 2026",
-    time: "9:58 PM",
-  },
-  {
-    id: 3,
-    transactionId: "TXN-000003",
-    studentNumber: "2026-0003",
-    studentName: "Carlo Reyes",
-    product: "Iced Tea",
-    slot: "A2",
-    amount: 25,
-    paymentMethod: "Student ID",
-    status: "Failed",
-    date: "Sep 20, 2026",
-    time: "9:42 PM",
-  },
-  {
-    id: 4,
-    transactionId: "TXN-000004",
-    studentNumber: "2026-0001",
-    studentName: "Juan Dela Cruz",
-    product: "Potato Chips",
-    slot: "A4",
-    amount: 30.25,
-    paymentMethod: "Student ID",
-    status: "Success",
-    date: "Sep 20, 2026",
-    time: "8:51 PM",
-  },
-  {
-    id: 5,
-    transactionId: "TXN-000005",
-    studentNumber: "2026-0004",
-    studentName: "Angela Cruz",
-    product: "Orange Juice",
-    slot: "B2",
-    amount: 30,
-    paymentMethod: "Student ID",
-    status: "Failed",
-    date: "Sep 20, 2026",
-    time: "8:30 PM",
-  },
-  {
-    id: 6,
-    transactionId: "TXN-000006",
-    studentNumber: "2026-0002",
-    studentName: "Maria Santos",
-    product: "Biscuits",
-    slot: "B1",
-    amount: 20.5,
-    paymentMethod: "Student ID",
-    status: "Pending",
-    date: "Sep 20, 2026",
-    time: "8:12 PM",
-  },
-];
+function formatPaymentMethod(method) {
+  if (!method) {
+    return "Unknown";
+  }
+
+  const labels = {
+    student_id: "Student ID",
+  };
+
+  return (
+    labels[method] ||
+    method
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  );
+}
+
+function formatStatus(status) {
+  if (!status) {
+    return "Pending";
+  }
+
+  return (
+    status.charAt(0).toUpperCase() +
+    status.slice(1).toLowerCase()
+  );
+}
+
+function formatTransactionDate(dateValue) {
+  if (!dateValue) {
+    return {
+      date: "—",
+      time: "—",
+    };
+  }
+
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return {
+      date: "—",
+      time: "—",
+    };
+  }
+
+  return {
+    date: date.toLocaleDateString("en-PH", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+
+    time: date.toLocaleTimeString("en-PH", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }),
+  };
+}
 
 export default function Transactions() {
-  const [transactions] = useState(initialTransactions);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  const [statusFilter, setStatusFilter] =
+    useState("All");
 
-  const [selectedTransaction, setSelectedTransaction] =
-    useState(null);
+  const [
+    selectedTransaction,
+    setSelectedTransaction,
+  ] = useState(null);
+
+  useEffect(() => {
+    const loadTransactions = async () => {
+      setLoading(true);
+      setPageError("");
+
+      const { data, error } = await supabase
+        .from("vending_transactions")
+        .select(`
+          id,
+          transaction_code,
+          student_id,
+          card_id,
+          machine_id,
+          slot_id,
+          product_id,
+          product_name,
+          amount,
+          payment_method,
+          status,
+          failure_reason,
+          created_at,
+          completed_at,
+          students (
+            id,
+            student_number,
+            full_name
+          ),
+          student_cards (
+            id,
+            card_uid
+          ),
+          machines (
+            id,
+            machine_code,
+            name
+          ),
+          vending_slots (
+            id,
+            slot_code,
+            motor_number
+          )
+        `)
+        .order("created_at", {
+          ascending: false,
+        });
+
+      if (error) {
+        console.error(
+          "Unable to load transactions:",
+          error
+        );
+
+        setPageError(
+          "Unable to load transactions. Please try again."
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      const formattedTransactions = (
+        data ?? []
+      ).map((transaction) => {
+        const dateInfo = formatTransactionDate(
+          transaction.created_at
+        );
+
+        const completedDateInfo =
+          formatTransactionDate(
+            transaction.completed_at
+          );
+
+        return {
+          id: transaction.id,
+
+          transactionId:
+            transaction.transaction_code,
+
+          studentId: transaction.student_id,
+
+          studentNumber:
+            transaction.students?.student_number ??
+            "Unknown",
+
+          studentName:
+            transaction.students?.full_name ??
+            "Unknown Student",
+
+          cardUid:
+            transaction.student_cards?.card_uid ??
+            "—",
+
+          product:
+            transaction.product_name ??
+            "Unknown Product",
+
+          slot:
+            transaction.vending_slots?.slot_code ??
+            "—",
+
+          motorNumber:
+            transaction.vending_slots
+              ?.motor_number ?? null,
+
+          machineCode:
+            transaction.machines?.machine_code ??
+            "—",
+
+          machineName:
+            transaction.machines?.name ??
+            "Unknown Machine",
+
+          amount: Number(
+            transaction.amount ?? 0
+          ),
+
+          paymentMethod: formatPaymentMethod(
+            transaction.payment_method
+          ),
+
+          status: formatStatus(
+            transaction.status
+          ),
+
+          failureReason:
+            transaction.failure_reason || "",
+
+          date: dateInfo.date,
+          time: dateInfo.time,
+
+          completedDate:
+            transaction.completed_at
+              ? completedDateInfo.date
+              : "—",
+
+          completedTime:
+            transaction.completed_at
+              ? completedDateInfo.time
+              : "—",
+
+          createdAt: transaction.created_at,
+          completedAt:
+            transaction.completed_at,
+        };
+      });
+
+      setTransactions(formattedTransactions);
+      setLoading(false);
+    };
+
+    loadTransactions();
+  }, []);
 
   const filteredTransactions = useMemo(() => {
-    const searchValue = search.trim().toLowerCase();
+    const searchValue = search
+      .trim()
+      .toLowerCase();
 
-    return transactions.filter((transaction) => {
-      const matchesSearch =
-        transaction.transactionId
-          .toLowerCase()
-          .includes(searchValue) ||
-        transaction.studentNumber
-          .toLowerCase()
-          .includes(searchValue) ||
-        transaction.studentName
-          .toLowerCase()
-          .includes(searchValue) ||
-        transaction.product
-          .toLowerCase()
-          .includes(searchValue);
+    return transactions.filter(
+      (transaction) => {
+        const matchesSearch =
+          transaction.transactionId
+            .toLowerCase()
+            .includes(searchValue) ||
+          transaction.studentNumber
+            .toLowerCase()
+            .includes(searchValue) ||
+          transaction.studentName
+            .toLowerCase()
+            .includes(searchValue) ||
+          transaction.product
+            .toLowerCase()
+            .includes(searchValue) ||
+          transaction.cardUid
+            .toLowerCase()
+            .includes(searchValue) ||
+          transaction.machineCode
+            .toLowerCase()
+            .includes(searchValue);
 
-      const matchesStatus =
-        statusFilter === "All" ||
-        transaction.status === statusFilter;
+        const matchesStatus =
+          statusFilter === "All" ||
+          transaction.status ===
+            statusFilter;
 
-      return matchesSearch && matchesStatus;
-    });
-  }, [transactions, search, statusFilter]);
+        return (
+          matchesSearch && matchesStatus
+        );
+      }
+    );
+  }, [
+    transactions,
+    search,
+    statusFilter,
+  ]);
 
-  const successfulTransactions = transactions.filter(
-    (transaction) => transaction.status === "Success"
-  );
+  const successfulTransactions =
+    transactions.filter(
+      (transaction) =>
+        transaction.status === "Success"
+    );
 
-  const failedTransactions = transactions.filter(
-    (transaction) => transaction.status === "Failed"
-  );
+  const failedTransactions =
+    transactions.filter(
+      (transaction) =>
+        transaction.status === "Failed"
+    );
 
+  const totalSales =
+    successfulTransactions.reduce(
+      (total, transaction) =>
+        total + transaction.amount,
+      0
+    );
 
-  const totalSales = successfulTransactions.reduce(
-    (total, transaction) => total + transaction.amount,
-    0
-  );
+  if (loading) {
+    return (
+      <div className="flex min-h-[300px] items-center justify-center">
+        <div className="text-center">
+          <RefreshCw
+            size={28}
+            className="mx-auto animate-spin text-blue-600"
+          />
+
+          <p className="mt-3 text-sm text-slate-500">
+            Loading transactions...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -150,10 +328,20 @@ export default function Transactions() {
         </h1>
 
         <p className="mt-1 text-sm text-slate-500">
-          Monitor vending machine purchases and student ID
-          payments.
+          Monitor vending machine purchases and
+          student ID payments.
         </p>
       </div>
+
+      {/* Page Error */}
+      {pageError && (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {pageError}
+        </div>
+      )}
 
       {/* Statistics */}
       <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -166,7 +354,9 @@ export default function Transactions() {
 
         <TransactionStatCard
           title="Successful"
-          value={successfulTransactions.length}
+          value={
+            successfulTransactions.length
+          }
           description="Completed purchases"
           icon={CheckCircle2}
         />
@@ -190,6 +380,7 @@ export default function Transactions() {
       <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         {/* Toolbar */}
         <div className="flex flex-col gap-4 border-b border-slate-200 p-5 md:flex-row md:items-center md:justify-between">
+          {/* Search */}
           <div className="relative w-full md:max-w-md">
             <Search
               size={18}
@@ -207,6 +398,7 @@ export default function Transactions() {
             />
           </div>
 
+          {/* Status Filter */}
           <div className="flex items-center gap-2">
             <SlidersHorizontal
               size={18}
@@ -216,7 +408,9 @@ export default function Transactions() {
             <select
               value={statusFilter}
               onChange={(event) =>
-                setStatusFilter(event.target.value)
+                setStatusFilter(
+                  event.target.value
+                )
               }
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
             >
@@ -234,6 +428,10 @@ export default function Transactions() {
 
               <option value="Pending">
                 Pending
+              </option>
+
+              <option value="Refunded">
+                Refunded
               </option>
             </select>
           </div>
@@ -281,14 +479,18 @@ export default function Transactions() {
                     key={transaction.id}
                     className="transition hover:bg-slate-50"
                   >
-                    {/* Transaction ID */}
+                    {/* Transaction */}
                     <td className="px-6 py-4">
                       <p className="text-sm font-semibold text-slate-800">
-                        {transaction.transactionId}
+                        {
+                          transaction.transactionId
+                        }
                       </p>
 
                       <p className="mt-1 text-xs text-slate-400">
-                        {transaction.paymentMethod}
+                        {
+                          transaction.paymentMethod
+                        }
                       </p>
                     </td>
 
@@ -299,7 +501,9 @@ export default function Transactions() {
                       </p>
 
                       <p className="mt-1 text-xs text-slate-400">
-                        {transaction.studentNumber}
+                        {
+                          transaction.studentNumber
+                        }
                       </p>
                     </td>
 
@@ -316,13 +520,18 @@ export default function Transactions() {
 
                     {/* Amount */}
                     <td className="px-6 py-4 text-sm font-semibold text-slate-900">
-                      ₱{transaction.amount.toFixed(2)}
+                      ₱
+                      {transaction.amount.toFixed(
+                        2
+                      )}
                     </td>
 
                     {/* Status */}
                     <td className="px-6 py-4">
                       <TransactionStatusBadge
-                        status={transaction.status}
+                        status={
+                          transaction.status
+                        }
                       />
                     </td>
 
@@ -358,7 +567,9 @@ export default function Transactions() {
             </tbody>
           </table>
 
-          {filteredTransactions.length === 0 && (
+          {/* Empty State */}
+          {filteredTransactions.length ===
+            0 && (
             <div className="px-6 py-14 text-center">
               <CreditCard
                 size={34}
@@ -370,8 +581,9 @@ export default function Transactions() {
               </p>
 
               <p className="mt-1 text-sm text-slate-400">
-                Try changing your search or status
-                filter.
+                {transactions.length === 0
+                  ? "No vending transactions have been recorded yet."
+                  : "Try changing your search or status filter."}
               </p>
             </div>
           )}
@@ -380,7 +592,8 @@ export default function Transactions() {
         {/* Footer */}
         <div className="border-t border-slate-200 px-6 py-4">
           <p className="text-sm text-slate-500">
-            Showing {filteredTransactions.length} of{" "}
+            Showing{" "}
+            {filteredTransactions.length} of{" "}
             {transactions.length} transactions
           </p>
         </div>
@@ -389,7 +602,7 @@ export default function Transactions() {
       {/* Transaction Details Modal */}
       {selectedTransaction && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl">
             {/* Header */}
             <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
               <div>
@@ -398,7 +611,9 @@ export default function Transactions() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  {selectedTransaction.transactionId}
+                  {
+                    selectedTransaction.transactionId
+                  }
                 </p>
               </div>
 
@@ -416,6 +631,7 @@ export default function Transactions() {
 
             {/* Details */}
             <div className="p-6">
+              {/* Amount and Status */}
               <div className="mb-6 flex items-center justify-between rounded-xl bg-slate-50 p-4">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -453,13 +669,47 @@ export default function Transactions() {
                 />
 
                 <DetailRow
+                  label="Card UID"
+                  value={
+                    selectedTransaction.cardUid
+                  }
+                />
+
+                <DetailRow
                   label="Product"
-                  value={selectedTransaction.product}
+                  value={
+                    selectedTransaction.product
+                  }
                 />
 
                 <DetailRow
                   label="Vending Slot"
-                  value={selectedTransaction.slot}
+                  value={
+                    selectedTransaction.slot
+                  }
+                />
+
+                <DetailRow
+                  label="Motor"
+                  value={
+                    selectedTransaction.motorNumber
+                      ? `Motor ${selectedTransaction.motorNumber}`
+                      : "—"
+                  }
+                />
+
+                <DetailRow
+                  label="Machine"
+                  value={
+                    selectedTransaction.machineName
+                  }
+                />
+
+                <DetailRow
+                  label="Machine Code"
+                  value={
+                    selectedTransaction.machineCode
+                  }
                 />
 
                 <DetailRow
@@ -470,14 +720,42 @@ export default function Transactions() {
                 />
 
                 <DetailRow
-                  label="Date"
-                  value={selectedTransaction.date}
+                  label="Created Date"
+                  value={
+                    selectedTransaction.date
+                  }
                 />
 
                 <DetailRow
-                  label="Time"
-                  value={selectedTransaction.time}
+                  label="Created Time"
+                  value={
+                    selectedTransaction.time
+                  }
                 />
+
+                <DetailRow
+                  label="Completed Date"
+                  value={
+                    selectedTransaction.completedDate
+                  }
+                />
+
+                <DetailRow
+                  label="Completed Time"
+                  value={
+                    selectedTransaction.completedTime
+                  }
+                />
+
+                {selectedTransaction.failureReason && (
+                  <DetailRow
+                    label="Failure Reason"
+                    value={
+                      selectedTransaction.failureReason
+                    }
+                    danger
+                  />
+                )}
               </div>
             </div>
 
@@ -540,8 +818,7 @@ function TransactionStatusBadge({ status }) {
     },
 
     Failed: {
-      className:
-        "bg-red-50 text-red-700",
+      className: "bg-red-50 text-red-700",
       icon: XCircle,
     },
 
@@ -550,9 +827,17 @@ function TransactionStatusBadge({ status }) {
         "bg-amber-50 text-amber-700",
       icon: Clock3,
     },
+
+    Refunded: {
+      className:
+        "bg-purple-50 text-purple-700",
+      icon: RefreshCw,
+    },
   };
 
-  const current = config[status];
+  const current =
+    config[status] ?? config.Pending;
+
   const Icon = current.icon;
 
   return (
@@ -565,15 +850,25 @@ function TransactionStatusBadge({ status }) {
   );
 }
 
-function DetailRow({ label, value }) {
+function DetailRow({
+  label,
+  value,
+  danger = false,
+}) {
   return (
-    <div className="flex items-center justify-between gap-6 py-3">
+    <div className="flex items-start justify-between gap-6 py-3">
       <span className="text-sm text-slate-500">
         {label}
       </span>
 
-      <span className="text-right text-sm font-medium text-slate-800">
-        {value}
+      <span
+        className={`max-w-[65%] text-right text-sm font-medium ${
+          danger
+            ? "text-red-600"
+            : "text-slate-800"
+        }`}
+      >
+        {value || "—"}
       </span>
     </div>
   );
