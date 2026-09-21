@@ -1,6 +1,8 @@
 import {
   Bell,
+  CheckCircle2,
   CreditCard,
+  Loader2,
   LockKeyhole,
   Package,
   Save,
@@ -8,33 +10,230 @@ import {
   ShieldCheck,
   User,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 
-const initialSettings = {
-  machineName: "SmartVend Machine 01",
-  machineLocation: "University Campus",
+const defaultSettings = {
+  machineId: null,
+  settingsId: null,
+
+  machineName: "",
+  machineLocation: "",
+
   currency: "PHP",
   lowStockThreshold: 3,
+
   paymentMethod: "Student ID Card",
   requireActiveCard: true,
   preventNegativeBalance: true,
+
   lowStockAlerts: true,
   machineOfflineAlerts: true,
   transactionFailureAlerts: true,
-  adminName: "Administrator",
-  adminEmail: "admin@smartvend.local",
+
+  adminName: "",
+  adminEmail: "",
 };
 
 export default function Settings() {
-  const [settings, setSettings] = useState(initialSettings);
+  const [settings, setSettings] = useState(defaultSettings);
   const [savedSettings, setSavedSettings] =
-    useState(initialSettings);
+    useState(defaultSettings);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [pageError, setPageError] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [showSavedMessage, setShowSavedMessage] =
     useState(false);
 
-  const hasChanges =
-    JSON.stringify(settings) !==
-    JSON.stringify(savedSettings);
+  const hasChanges = useMemo(
+    () =>
+      JSON.stringify(settings) !==
+      JSON.stringify(savedSettings),
+    [settings, savedSettings]
+  );
+
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setPageError("");
+
+    try {
+      /*
+       * Get authenticated administrator.
+       */
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      if (!user) {
+        throw new Error(
+          "No authenticated administrator was found."
+        );
+      }
+
+      /*
+       * Load administrator profile.
+       */
+      const {
+        data: adminProfile,
+        error: adminError,
+      } = await supabase
+        .from("admin_profiles")
+        .select("id, full_name, role, status")
+        .eq("id", user.id)
+        .single();
+
+      if (adminError) {
+        throw adminError;
+      }
+
+      /*
+       * Load the vending machine.
+       *
+       * For the current project we have one machine.
+       * Later, this can be changed into multi-machine
+       * management if needed.
+       */
+      const {
+        data: machines,
+        error: machineError,
+      } = await supabase
+        .from("machines")
+        .select(
+          `
+            id,
+            machine_code,
+            name,
+            location,
+            status
+          `
+        )
+        .order("created_at", {
+          ascending: true,
+        })
+        .limit(1);
+
+      if (machineError) {
+        throw machineError;
+      }
+
+      const machine = machines?.[0];
+
+      if (!machine) {
+        throw new Error(
+          "No vending machine record was found."
+        );
+      }
+
+      /*
+       * Load system settings belonging to this machine.
+       */
+      const {
+        data: systemSettings,
+        error: settingsError,
+      } = await supabase
+        .from("system_settings")
+        .select(
+          `
+            id,
+            machine_id,
+            currency,
+            low_stock_threshold,
+            require_active_card,
+            prevent_negative_balance,
+            low_stock_alerts,
+            machine_offline_alerts,
+            transaction_failure_alerts
+          `
+        )
+        .eq("machine_id", machine.id)
+        .maybeSingle();
+
+      if (settingsError) {
+        throw settingsError;
+      }
+
+      const loadedSettings = {
+        machineId: machine.id,
+        settingsId: systemSettings?.id ?? null,
+
+        machineName: machine.name ?? "",
+        machineLocation: machine.location ?? "",
+
+        currency:
+          systemSettings?.currency ?? "PHP",
+
+        lowStockThreshold:
+          systemSettings?.low_stock_threshold ?? 3,
+
+        paymentMethod: "Student ID Card",
+
+        requireActiveCard:
+          systemSettings?.require_active_card ?? true,
+
+        preventNegativeBalance:
+          systemSettings?.prevent_negative_balance ??
+          true,
+
+        lowStockAlerts:
+          systemSettings?.low_stock_alerts ?? true,
+
+        machineOfflineAlerts:
+          systemSettings?.machine_offline_alerts ??
+          true,
+
+        transactionFailureAlerts:
+          systemSettings
+            ?.transaction_failure_alerts ?? true,
+
+        adminName:
+          adminProfile?.full_name ??
+          "Administrator",
+
+        adminEmail: user.email ?? "",
+      };
+
+      setSettings(loadedSettings);
+      setSavedSettings(loadedSettings);
+    } catch (error) {
+      console.error(
+        "Unable to load settings:",
+        error
+      );
+
+      setPageError(
+        error?.message ||
+          "Unable to load system settings."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const initialize = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      await loadSettings();
+    };
+
+    void initialize();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSettings]);
 
   const updateSetting = (field, value) => {
     setSettings((current) => ({
@@ -43,17 +242,228 @@ export default function Settings() {
     }));
 
     setShowSavedMessage(false);
+    setSaveError("");
   };
 
-  const handleSave = () => {
-    setSavedSettings(settings);
-    setShowSavedMessage(true);
+  const handleSave = async () => {
+    if (!settings.machineId) {
+      setSaveError(
+        "The vending machine record could not be identified."
+      );
+      return;
+    }
+
+    const machineName = settings.machineName.trim();
+    const machineLocation =
+      settings.machineLocation.trim();
+
+    if (!machineName) {
+      setSaveError(
+        "Machine name cannot be empty."
+      );
+      return;
+    }
+
+    const lowStockThreshold = Number(
+      settings.lowStockThreshold
+    );
+
+    if (
+      !Number.isInteger(lowStockThreshold) ||
+      lowStockThreshold < 0 ||
+      lowStockThreshold > 100
+    ) {
+      setSaveError(
+        "Low stock threshold must be a whole number from 0 to 100."
+      );
+      return;
+    }
+
+    const adminName = settings.adminName.trim();
+
+    if (!adminName) {
+      setSaveError(
+        "Administrator name cannot be empty."
+      );
+      return;
+    }
+
+    setSaving(true);
+    setSaveError("");
+    setShowSavedMessage(false);
+
+    try {
+      /*
+       * Update machine information.
+       */
+      const {
+        error: machineUpdateError,
+      } = await supabase
+        .from("machines")
+        .update({
+          name: machineName,
+          location:
+            machineLocation || null,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq("id", settings.machineId);
+
+      if (machineUpdateError) {
+        throw machineUpdateError;
+      }
+
+      /*
+       * Save system settings.
+       *
+       * Upsert allows this to work whether the
+       * settings record already exists or not.
+       */
+      const {
+        data: savedSystemSettings,
+        error: systemSettingsError,
+      } = await supabase
+        .from("system_settings")
+        .upsert(
+          {
+            machine_id: settings.machineId,
+
+            currency: settings.currency,
+
+            low_stock_threshold:
+              lowStockThreshold,
+
+            require_active_card:
+              settings.requireActiveCard,
+
+            prevent_negative_balance:
+              settings.preventNegativeBalance,
+
+            low_stock_alerts:
+              settings.lowStockAlerts,
+
+            machine_offline_alerts:
+              settings.machineOfflineAlerts,
+
+            transaction_failure_alerts:
+              settings.transactionFailureAlerts,
+
+            updated_at:
+              new Date().toISOString(),
+          },
+          {
+            onConflict: "machine_id",
+          }
+        )
+        .select(
+          `
+            id,
+            machine_id,
+            currency,
+            low_stock_threshold,
+            require_active_card,
+            prevent_negative_balance,
+            low_stock_alerts,
+            machine_offline_alerts,
+            transaction_failure_alerts
+          `
+        )
+        .single();
+
+      if (systemSettingsError) {
+        throw systemSettingsError;
+      }
+
+      /*
+       * Update administrator display name.
+       *
+       * Email is intentionally not changed here.
+       * Authentication email belongs to Supabase Auth.
+       */
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      if (!user) {
+        throw new Error(
+          "Administrator session was lost."
+        );
+      }
+
+      const {
+        error: adminUpdateError,
+      } = await supabase
+        .from("admin_profiles")
+        .update({
+          full_name: adminName,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      if (adminUpdateError) {
+        throw adminUpdateError;
+      }
+
+      const normalizedSettings = {
+        ...settings,
+
+        settingsId:
+          savedSystemSettings.id,
+
+        machineName,
+        machineLocation,
+
+        lowStockThreshold,
+
+        adminName,
+      };
+
+      setSettings(normalizedSettings);
+      setSavedSettings(normalizedSettings);
+      setShowSavedMessage(true);
+    } catch (error) {
+      console.error(
+        "Unable to save settings:",
+        error
+      );
+
+      setSaveError(
+        error?.message ||
+          "Unable to save system settings."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleReset = () => {
     setSettings(savedSettings);
     setShowSavedMessage(false);
+    setSaveError("");
   };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center">
+        <div className="text-center">
+          <Loader2
+            size={30}
+            className="mx-auto animate-spin text-blue-600"
+          />
+
+          <p className="mt-3 text-sm text-slate-500">
+            Loading system settings...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pb-8">
@@ -75,7 +485,8 @@ export default function Settings() {
             <button
               type="button"
               onClick={handleReset}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              disabled={saving}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel Changes
             </button>
@@ -84,20 +495,48 @@ export default function Settings() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={!hasChanges}
+            disabled={!hasChanges || saving}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            <Save size={17} />
-            Save Settings
+            {saving ? (
+              <Loader2
+                size={17}
+                className="animate-spin"
+              />
+            ) : (
+              <Save size={17} />
+            )}
+
+            {saving
+              ? "Saving..."
+              : "Save Settings"}
           </button>
         </div>
       </div>
+
+      {/* Page Error */}
+      {pageError && (
+        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm font-medium text-red-700">
+            {pageError}
+          </p>
+        </div>
+      )}
+
+      {/* Save Error */}
+      {saveError && (
+        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm font-medium text-red-700">
+            {saveError}
+          </p>
+        </div>
+      )}
 
       {/* Saved Message */}
       {showSavedMessage && (
         <div className="mt-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
           <div className="flex items-center gap-2">
-            <ShieldCheck
+            <CheckCircle2
               size={18}
               className="text-green-600"
             />
@@ -129,6 +568,7 @@ export default function Settings() {
                   event.target.value
                 )
               }
+              disabled={saving}
               className="settings-input"
             />
           </SettingField>
@@ -146,6 +586,7 @@ export default function Settings() {
                   event.target.value
                 )
               }
+              disabled={saving}
               className="settings-input"
             />
           </SettingField>
@@ -162,6 +603,7 @@ export default function Settings() {
                   event.target.value
                 )
               }
+              disabled={saving}
               className="settings-input"
             >
               <option value="PHP">
@@ -183,16 +625,17 @@ export default function Settings() {
           >
             <input
               type="number"
-              min="1"
+              min="0"
               max="100"
               step="1"
               value={settings.lowStockThreshold}
               onChange={(event) =>
                 updateSetting(
                   "lowStockThreshold",
-                  Number(event.target.value)
+                  event.target.value
                 )
               }
+              disabled={saving}
               className="settings-input"
             />
           </SettingField>
@@ -207,14 +650,15 @@ export default function Settings() {
               <strong>
                 {settings.lowStockThreshold} or fewer
               </strong>{" "}
-              will be marked as low stock.
+              will be considered low stock.
             </p>
           </div>
 
           <ToggleSetting
             title="Low Stock Alerts"
-            description="Notify administrators when inventory reaches the low-stock threshold."
+            description="Enable low-stock alert processing for administrators."
             checked={settings.lowStockAlerts}
+            disabled={saving}
             onChange={() =>
               updateSetting(
                 "lowStockAlerts",
@@ -236,13 +680,8 @@ export default function Settings() {
           >
             <select
               value={settings.paymentMethod}
-              onChange={(event) =>
-                updateSetting(
-                  "paymentMethod",
-                  event.target.value
-                )
-              }
-              className="settings-input"
+              disabled
+              className="settings-input cursor-not-allowed bg-slate-50"
             >
               <option value="Student ID Card">
                 University Student ID Card
@@ -254,6 +693,7 @@ export default function Settings() {
             title="Require Active Card"
             description="Only active student cards can make purchases."
             checked={settings.requireActiveCard}
+            disabled={saving}
             onChange={() =>
               updateSetting(
                 "requireActiveCard",
@@ -266,6 +706,7 @@ export default function Settings() {
             title="Prevent Negative Balance"
             description="Reject purchases when the student's balance is insufficient."
             checked={settings.preventNegativeBalance}
+            disabled={saving}
             onChange={() =>
               updateSetting(
                 "preventNegativeBalance",
@@ -288,10 +729,10 @@ export default function Settings() {
 
                 <p className="mt-1 text-sm leading-6 text-amber-700">
                   Student numbers and electronic card
-                  UIDs will remain separate records.
-                  Actual university ID compatibility
-                  will be verified with the RFID/NFC
-                  hardware later.
+                  UIDs are stored separately. Actual
+                  university ID compatibility will be
+                  verified with the RFID/NFC hardware
+                  during hardware integration.
                 </p>
               </div>
             </div>
@@ -306,8 +747,9 @@ export default function Settings() {
         >
           <ToggleSetting
             title="Machine Offline"
-            description="Alert when the ESP32 stops sending heartbeat messages."
+            description="Enable alerts when the ESP32-S3 stops sending heartbeat messages."
             checked={settings.machineOfflineAlerts}
+            disabled={saving}
             onChange={() =>
               updateSetting(
                 "machineOfflineAlerts",
@@ -318,10 +760,11 @@ export default function Settings() {
 
           <ToggleSetting
             title="Transaction Failures"
-            description="Alert administrators about failed vending transactions."
+            description="Enable alerts for failed vending transactions."
             checked={
               settings.transactionFailureAlerts
             }
+            disabled={saving}
             onChange={() =>
               updateSetting(
                 "transactionFailureAlerts",
@@ -332,10 +775,10 @@ export default function Settings() {
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs leading-5 text-slate-500">
-              Notifications are currently interface
-              settings only. Backend alert processing
-              will be added during database and ESP32
-              integration.
+              These preferences are now stored in the
+              database. Automated notification delivery
+              can be implemented later when the alert
+              processing layer is added.
             </p>
           </div>
         </SettingsSection>
@@ -359,38 +802,34 @@ export default function Settings() {
                   event.target.value
                 )
               }
+              disabled={saving}
               className="settings-input"
             />
           </SettingField>
 
           <SettingField
             label="Email Address"
-            description="Email associated with the administrator account."
+            description="Authentication email associated with this administrator."
           >
             <input
               type="email"
               value={settings.adminEmail}
-              onChange={(event) =>
-                updateSetting(
-                  "adminEmail",
-                  event.target.value
-                )
-              }
-              className="settings-input"
+              readOnly
+              className="settings-input cursor-not-allowed bg-slate-50"
             />
           </SettingField>
 
-          <button
-            type="button"
-            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            Change Password
-          </button>
+          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+            <p className="text-sm font-semibold text-blue-800">
+              Authentication account
+            </p>
 
-          <p className="text-xs leading-5 text-slate-400">
-            Password management will be connected to
-            the authentication system later.
-          </p>
+            <p className="mt-1 text-xs leading-5 text-blue-700">
+              Administrator authentication is managed
+              by Supabase Auth. Changing the display
+              name here does not change the login email.
+            </p>
+          </div>
         </SettingsSection>
 
         {/* System Security */}
@@ -400,21 +839,27 @@ export default function Settings() {
           description="Security information for the vending system."
         >
           <SecurityItem
+            title="Administrator Authentication"
+            status="Protected"
+            description="Administrator login is authenticated through Supabase Auth."
+          />
+
+          <SecurityItem
+            title="Database Access"
+            status="Protected"
+            description="Database tables are protected using Row Level Security and administrator authorization."
+          />
+
+          <SecurityItem
             title="Frontend Credentials"
             status="Protected"
-            description="Sensitive credentials will not be stored directly in React source code."
+            description="The frontend uses the public Supabase client key while privileged service credentials remain outside the React application."
           />
 
           <SecurityItem
-            title="ESP32 Communication"
+            title="ESP32-S3 Communication"
             status="Planned"
-            description="The MicroPython controller will communicate through authenticated backend requests."
-          />
-
-          <SecurityItem
-            title="Database Security"
-            status="Planned"
-            description="Database permissions and access policies will be configured during backend integration."
+            description="The physical controller will use authenticated backend communication and will not receive administrator database credentials."
           />
 
           <div className="rounded-xl border border-red-100 bg-red-50 p-4">
@@ -426,7 +871,7 @@ export default function Settings() {
 
               <p className="text-xs leading-5 text-red-700">
                 Wi-Fi passwords, private API keys,
-                database service keys, and device
+                Supabase service-role keys, and device
                 credentials must never be placed in
                 frontend source code or committed to
                 GitHub.
@@ -436,7 +881,6 @@ export default function Settings() {
         </SettingsSection>
       </div>
 
-      {/* Local CSS for repeated input styling */}
       <style>{`
         .settings-input {
           width: 100%;
@@ -453,6 +897,11 @@ export default function Settings() {
         .settings-input:focus {
           border-color: #3b82f6;
           box-shadow: 0 0 0 4px #dbeafe;
+        }
+
+        .settings-input:disabled,
+        .settings-input:read-only {
+          background: #f8fafc;
         }
       `}</style>
     </div>
@@ -517,6 +966,7 @@ function ToggleSetting({
   description,
   checked,
   onChange,
+  disabled = false,
 }) {
   return (
     <div className="flex items-center justify-between gap-5 rounded-xl border border-slate-200 p-4">
@@ -534,9 +984,14 @@ function ToggleSetting({
         type="button"
         role="switch"
         aria-checked={checked}
+        disabled={disabled}
         onClick={onChange}
         className={`relative h-6 w-11 shrink-0 rounded-full transition ${
           checked ? "bg-blue-600" : "bg-slate-300"
+        } ${
+          disabled
+            ? "cursor-not-allowed opacity-60"
+            : ""
         }`}
       >
         <span
