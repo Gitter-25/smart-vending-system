@@ -4,57 +4,14 @@ import {
   CheckCircle2,
   Package,
   PackageOpen,
+  Pencil,
   RefreshCw,
   Search,
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-
-const initialInventory = [
-  {
-    id: 1,
-    slot: "A1",
-    product: "Bottled Water",
-    quantity: 8,
-    capacity: 10,
-  },
-  {
-    id: 2,
-    slot: "A2",
-    product: "Iced Tea",
-    quantity: 3,
-    capacity: 10,
-  },
-  {
-    id: 3,
-    slot: "A3",
-    product: "Chocolate Bar",
-    quantity: 0,
-    capacity: 10,
-  },
-  {
-    id: 4,
-    slot: "A4",
-    product: "Potato Chips",
-    quantity: 10,
-    capacity: 10,
-  },
-  {
-    id: 5,
-    slot: "B1",
-    product: "Biscuits",
-    quantity: 5,
-    capacity: 10,
-  },
-  {
-    id: 6,
-    slot: "B2",
-    product: "Orange Juice",
-    quantity: 2,
-    capacity: 10,
-  },
-];
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 
 function getStockStatus(quantity, capacity) {
   if (quantity === 0) {
@@ -73,29 +30,138 @@ function getStockStatus(quantity, capacity) {
 }
 
 export default function Inventory() {
-  const [inventory, setInventory] = useState(initialInventory);
+  const [inventory, setInventory] = useState([]);
+  const [products, setProducts] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
 
-  const [restockItem, setRestockItem] = useState(null);
-  const [restockQuantity, setRestockQuantity] = useState("");
-  const [restockError, setRestockError] = useState("");
+  // Product assignment
+  const [assignItem, setAssignItem] = useState(null);
+  const [selectedProductId, setSelectedProductId] =
+    useState("");
+  const [assignError, setAssignError] = useState("");
+  const [assigning, setAssigning] = useState(false);
 
+  // Restocking
+  const [restockItem, setRestockItem] = useState(null);
+  const [restockQuantity, setRestockQuantity] =
+    useState("");
+  const [restockError, setRestockError] = useState("");
+  const [restocking, setRestocking] = useState(false);
+
+  // Load inventory and products
+  useEffect(() => {
+    const loadInventory = async () => {
+      setLoading(true);
+      setPageError("");
+
+      const [slotsResult, productsResult] =
+        await Promise.all([
+          supabase
+            .from("vending_slots")
+            .select(`
+              id,
+              slot_code,
+              motor_number,
+              quantity,
+              capacity,
+              status,
+              product_id,
+              products (
+                id,
+                name
+              )
+            `)
+            .order("motor_number", {
+              ascending: true,
+            }),
+
+          supabase
+            .from("products")
+            .select("id, name, status")
+            .eq("status", "active")
+            .order("name", {
+              ascending: true,
+            }),
+        ]);
+
+      if (slotsResult.error) {
+        console.error(
+          "Unable to load inventory:",
+          slotsResult.error
+        );
+
+        setPageError(
+          "Unable to load inventory. Please try again."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (productsResult.error) {
+        console.error(
+          "Unable to load products:",
+          productsResult.error
+        );
+
+        setPageError(
+          "Unable to load products. Please try again."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const formattedInventory = (
+        slotsResult.data ?? []
+      ).map((slot) => ({
+        id: slot.id,
+        slot: slot.slot_code,
+        motorNumber: slot.motor_number,
+        productId: slot.product_id,
+        product:
+          slot.products?.name ?? "Unassigned",
+        quantity: slot.quantity,
+        capacity: slot.capacity,
+        slotStatus: slot.status,
+      }));
+
+      setInventory(formattedInventory);
+      setProducts(productsResult.data ?? []);
+      setLoading(false);
+    };
+
+    loadInventory();
+  }, []);
+
+  // Add stock status to each slot
   const inventoryWithStatus = useMemo(() => {
     return inventory.map((item) => ({
       ...item,
-      status: getStockStatus(item.quantity, item.capacity),
+      status: getStockStatus(
+        item.quantity,
+        item.capacity
+      ),
     }));
   }, [inventory]);
 
+  // Search and filter
   const filteredInventory = useMemo(() => {
     return inventoryWithStatus.filter((item) => {
-      const searchValue = search.toLowerCase();
+      const searchValue = search
+        .trim()
+        .toLowerCase();
 
       const matchesSearch =
-        item.product.toLowerCase().includes(searchValue) ||
-        item.slot.toLowerCase().includes(searchValue);
+        item.product
+          .toLowerCase()
+          .includes(searchValue) ||
+        item.slot
+          .toLowerCase()
+          .includes(searchValue);
 
       const matchesStatus =
         statusFilter === "All" ||
@@ -103,8 +169,13 @@ export default function Inventory() {
 
       return matchesSearch && matchesStatus;
     });
-  }, [inventoryWithStatus, search, statusFilter]);
+  }, [
+    inventoryWithStatus,
+    search,
+    statusFilter,
+  ]);
 
+  // Statistics
   const totalStock = inventory.reduce(
     (total, item) => total + item.quantity,
     0
@@ -115,27 +186,135 @@ export default function Inventory() {
     0
   );
 
-  const lowStockCount = inventoryWithStatus.filter(
-    (item) => item.status === "Low Stock"
-  ).length;
+  const lowStockCount =
+    inventoryWithStatus.filter(
+      (item) => item.status === "Low Stock"
+    ).length;
 
-  const emptySlotCount = inventoryWithStatus.filter(
-    (item) => item.status === "Out of Stock"
-  ).length;
+  const emptySlotCount =
+    inventoryWithStatus.filter(
+      (item) => item.status === "Out of Stock"
+    ).length;
+
+  // -------------------------
+  // Product Assignment
+  // -------------------------
+
+  const openAssignModal = (item) => {
+    setAssignItem(item);
+    setSelectedProductId(item.productId ?? "");
+    setAssignError("");
+  };
+
+  const closeAssignModal = () => {
+    if (assigning) {
+      return;
+    }
+
+    setAssignItem(null);
+    setSelectedProductId("");
+    setAssignError("");
+  };
+
+  const handleAssignProduct = async (event) => {
+    event.preventDefault();
+
+    if (!assignItem) {
+      return;
+    }
+
+    setAssignError("");
+
+    if (!selectedProductId) {
+      setAssignError("Select a product.");
+      return;
+    }
+
+    // Do not allow switching products while
+    // inventory is still inside the slot.
+    if (
+      assignItem.productId &&
+      assignItem.productId !== selectedProductId &&
+      assignItem.quantity > 0
+    ) {
+      setAssignError(
+        "Empty this slot before assigning a different product."
+      );
+      return;
+    }
+
+    setAssigning(true);
+
+    const { error } = await supabase
+      .from("vending_slots")
+      .update({
+        product_id: selectedProductId,
+      })
+      .eq("id", assignItem.id);
+
+    if (error) {
+      console.error(
+        "Unable to assign product:",
+        error
+      );
+
+      setAssignError(
+        "Unable to assign product. Please try again."
+      );
+      setAssigning(false);
+      return;
+    }
+
+    const selectedProduct = products.find(
+      (product) =>
+        product.id === selectedProductId
+    );
+
+    setInventory((current) =>
+      current.map((item) =>
+        item.id === assignItem.id
+          ? {
+              ...item,
+              productId: selectedProductId,
+              product:
+                selectedProduct?.name ??
+                "Unassigned",
+            }
+          : item
+      )
+    );
+
+    setAssigning(false);
+    setAssignItem(null);
+    setSelectedProductId("");
+    setAssignError("");
+  };
+
+  // -------------------------
+  // Restocking
+  // -------------------------
 
   const openRestockModal = (item) => {
+    if (!item.productId) {
+      return;
+    }
+
     setRestockItem(item);
     setRestockQuantity("");
     setRestockError("");
   };
 
   const closeRestockModal = () => {
+    if (restocking) {
+      return;
+    }
+
     setRestockItem(null);
     setRestockQuantity("");
     setRestockError("");
   };
 
-  const handleRestock = (event) => {
+  const handleRestock = async (event) => {
     event.preventDefault();
 
     if (!restockItem) {
@@ -143,6 +322,13 @@ export default function Inventory() {
     }
 
     setRestockError("");
+
+    if (!restockItem.productId) {
+      setRestockError(
+        "Assign a product before restocking this slot."
+      );
+      return;
+    }
 
     const amount = Number(restockQuantity);
 
@@ -159,7 +345,8 @@ export default function Inventory() {
     }
 
     const availableSpace =
-      restockItem.capacity - restockItem.quantity;
+      restockItem.capacity -
+      restockItem.quantity;
 
     if (amount > availableSpace) {
       setRestockError(
@@ -170,19 +357,65 @@ export default function Inventory() {
       return;
     }
 
+    const newQuantity =
+      restockItem.quantity + amount;
+
+    setRestocking(true);
+
+    const { error } = await supabase
+      .from("vending_slots")
+      .update({
+        quantity: newQuantity,
+      })
+      .eq("id", restockItem.id);
+
+    if (error) {
+      console.error(
+        "Unable to restock slot:",
+        error
+      );
+
+      setRestockError(
+        "Unable to update inventory. Please try again."
+      );
+      setRestocking(false);
+      return;
+    }
+
     setInventory((current) =>
       current.map((item) =>
         item.id === restockItem.id
           ? {
               ...item,
-              quantity: item.quantity + amount,
+              quantity: newQuantity,
             }
           : item
       )
     );
 
-    closeRestockModal();
+    setRestocking(false);
+    setRestockItem(null);
+    setRestockQuantity("");
+    setRestockError("");
   };
+
+  // Loading screen
+  if (loading) {
+    return (
+      <div className="flex min-h-[300px] items-center justify-center">
+        <div className="text-center">
+          <RefreshCw
+            size={28}
+            className="mx-auto animate-spin text-blue-600"
+          />
+
+          <p className="mt-3 text-sm text-slate-500">
+            Loading inventory...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -193,10 +426,20 @@ export default function Inventory() {
         </h1>
 
         <p className="mt-1 text-sm text-slate-500">
-          Monitor vending machine stock levels and product
-          slots.
+          Monitor vending machine stock levels and
+          product slots.
         </p>
       </div>
+
+      {/* Page Error */}
+      {pageError && (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {pageError}
+        </div>
+      )}
 
       {/* Statistics */}
       <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -330,6 +573,10 @@ export default function Inventory() {
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-600">
                       {item.slot}
                     </div>
+
+                    <p className="mt-1 text-xs text-slate-400">
+                      Motor {item.motorNumber}
+                    </p>
                   </td>
 
                   {/* Product */}
@@ -339,9 +586,17 @@ export default function Inventory() {
                         <Package size={18} />
                       </div>
 
-                      <p className="text-sm font-semibold text-slate-800">
-                        {item.product}
-                      </p>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">
+                          {item.product}
+                        </p>
+
+                        {!item.productId && (
+                          <p className="mt-0.5 text-xs text-slate-400">
+                            No product assigned
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </td>
 
@@ -385,21 +640,39 @@ export default function Inventory() {
                     />
                   </td>
 
-                  {/* Restock */}
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openRestockModal(item)
-                      }
-                      disabled={
-                        item.quantity >= item.capacity
-                      }
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <RefreshCw size={15} />
-                      Restock
-                    </button>
+                  {/* Actions */}
+                  <td className="px-6 py-4">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openAssignModal(item)
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                      >
+                        <Pencil size={15} />
+
+                        {item.productId
+                          ? "Change"
+                          : "Assign"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openRestockModal(item)
+                        }
+                        disabled={
+                          !item.productId ||
+                          item.quantity >=
+                            item.capacity
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <RefreshCw size={15} />
+                        Restock
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -419,7 +692,8 @@ export default function Inventory() {
               </p>
 
               <p className="mt-1 text-sm text-slate-400">
-                Try changing your search or stock filter.
+                Try changing your search or stock
+                filter.
               </p>
             </div>
           )}
@@ -434,6 +708,152 @@ export default function Inventory() {
         </div>
       </div>
 
+      {/* Assign Product Modal */}
+      {assignItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Assign Product
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Select a product for slot{" "}
+                  {assignItem.slot}.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeAssignModal}
+                disabled={assigning}
+                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAssignProduct}>
+              <div className="space-y-5 p-6">
+                {/* Slot Information */}
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-500">
+                      Slot
+                    </span>
+
+                    <span className="font-semibold text-slate-900">
+                      {assignItem.slot}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-sm text-slate-500">
+                      Motor
+                    </span>
+
+                    <span className="font-semibold text-slate-900">
+                      {assignItem.motorNumber}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-sm text-slate-500">
+                      Current stock
+                    </span>
+
+                    <span className="font-semibold text-slate-900">
+                      {assignItem.quantity} /{" "}
+                      {assignItem.capacity}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Product Selection */}
+                <div>
+                  <label
+                    htmlFor="product-assignment"
+                    className="mb-2 block text-sm font-medium text-slate-700"
+                  >
+                    Product
+                  </label>
+
+                  <select
+                    id="product-assignment"
+                    value={selectedProductId}
+                    onChange={(event) =>
+                      setSelectedProductId(
+                        event.target.value
+                      )
+                    }
+                    disabled={assigning}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
+                  >
+                    <option value="">
+                      Select a product
+                    </option>
+
+                    {products.map((product) => (
+                      <option
+                        key={product.id}
+                        value={product.id}
+                      >
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {products.length === 0 && (
+                    <p className="mt-2 text-xs text-amber-600">
+                      No active products are
+                      available. Add a product first.
+                    </p>
+                  )}
+                </div>
+
+                {/* Assignment Error */}
+                {assignError && (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                  >
+                    {assignError}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+                <button
+                  type="button"
+                  onClick={closeAssignModal}
+                  disabled={assigning}
+                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={
+                    assigning ||
+                    products.length === 0
+                  }
+                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {assigning
+                    ? "Assigning..."
+                    : "Assign Product"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Restock Modal */}
       {restockItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
@@ -446,14 +866,16 @@ export default function Inventory() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Add stock for {restockItem.product}.
+                  Add stock for{" "}
+                  {restockItem.product}.
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={closeRestockModal}
-                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                disabled={restocking}
+                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
                 aria-label="Close"
               >
                 <X size={20} />
@@ -465,6 +887,16 @@ export default function Inventory() {
                 {/* Current Stock */}
                 <div className="rounded-xl bg-slate-50 p-4">
                   <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-500">
+                      Product
+                    </span>
+
+                    <span className="font-semibold text-slate-900">
+                      {restockItem.product}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between">
                     <span className="text-sm text-slate-500">
                       Current stock
                     </span>
@@ -500,6 +932,10 @@ export default function Inventory() {
                     id="restock-quantity"
                     type="number"
                     min="1"
+                    max={
+                      restockItem.capacity -
+                      restockItem.quantity
+                    }
                     step="1"
                     value={restockQuantity}
                     onChange={(event) =>
@@ -508,11 +944,13 @@ export default function Inventory() {
                       )
                     }
                     placeholder="Enter quantity"
-                    className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                    disabled={restocking}
+                    className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                     autoFocus
                   />
                 </div>
 
+                {/* Restock Error */}
                 {restockError && (
                   <div
                     role="alert"
@@ -528,16 +966,20 @@ export default function Inventory() {
                 <button
                   type="button"
                   onClick={closeRestockModal}
-                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  disabled={restocking}
+                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                  disabled={restocking}
+                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Restock
+                  {restocking
+                    ? "Restocking..."
+                    : "Restock"}
                 </button>
               </div>
             </form>
@@ -582,9 +1024,12 @@ function InventoryStatCard({
 function StockStatusBadge({ status }) {
   const styles = {
     Full: "bg-blue-50 text-blue-700",
-    "In Stock": "bg-green-50 text-green-700",
-    "Low Stock": "bg-amber-50 text-amber-700",
-    "Out of Stock": "bg-red-50 text-red-700",
+    "In Stock":
+      "bg-green-50 text-green-700",
+    "Low Stock":
+      "bg-amber-50 text-amber-700",
+    "Out of Stock":
+      "bg-red-50 text-red-700",
   };
 
   const icons = {
