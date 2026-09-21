@@ -1,197 +1,247 @@
-import { useRef, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   CheckCircle2,
   CircleDot,
   Cpu,
+  Database,
   Gauge,
+  Package,
   Radio,
   RefreshCw,
   Router,
-  TestTube2,
   Wifi,
   WifiOff,
-  X,
-  Zap,
+  XCircle,
 } from "lucide-react";
-
-const initialSlots = [
-  {
-    id: "A1",
-    product: "Bottled Water",
-    motor: "Motor 1",
-    status: "Ready",
-  },
-  {
-    id: "A2",
-    product: "Iced Tea",
-    motor: "Motor 2",
-    status: "Ready",
-  },
-  {
-    id: "A3",
-    product: "Chocolate Bar",
-    motor: "Motor 3",
-    status: "Error",
-  },
-  {
-    id: "A4",
-    product: "Potato Chips",
-    motor: "Motor 4",
-    status: "Ready",
-  },
-  {
-    id: "B1",
-    product: "Biscuits",
-    motor: "Motor 5",
-    status: "Ready",
-  },
-  {
-    id: "B2",
-    product: "Orange Juice",
-    motor: "Motor 6",
-    status: "Ready",
-  },
-];
-
-const initialEvents = [
-  {
-    id: 1,
-    type: "success",
-    title: "Machine heartbeat received",
-    description: "ESP32 controller responded successfully.",
-    time: "10:38 PM",
-  },
-  {
-    id: 2,
-    type: "success",
-    title: "RFID/NFC reader ready",
-    description: "Student ID card reader is available.",
-    time: "10:37 PM",
-  },
-  {
-    id: 3,
-    type: "error",
-    title: "Slot A3 motor error",
-    description: "Motor 3 did not respond during diagnostics.",
-    time: "10:32 PM",
-  },
-  {
-    id: 4,
-    type: "success",
-    title: "Controller connected",
-    description: "ESP32 established a connection to the system.",
-    time: "10:30 PM",
-  },
-];
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 
 export default function Machine() {
-  const [machineOnline, setMachineOnline] = useState(true);
-  const [readerOnline] = useState(true);
-  const [slots, setSlots] = useState(initialSlots);
-  const [events, setEvents] = useState(initialEvents);
-  const nextEventId = useRef(100);
+  const [machine, setMachine] = useState(null);
+  const [slots, setSlots] = useState([]);
+  const [events, setEvents] = useState([]);
 
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pageError, setPageError] = useState("");
 
-  const [testingSlot, setTestingSlot] = useState(null);
-  const [selectedSlot, setSelectedSlot] = useState(null);
+  /*
+   * Hardware is not connected yet.
+   *
+   * Later, the ESP32-S3 will update:
+   * - machines.status
+   * - machines.last_heartbeat
+   * - vending_slots.status
+   * - machine_events
+   *
+   * The admin frontend should only display that data.
+   */
 
-  const readySlots = slots.filter(
-    (slot) => slot.status === "Ready"
-  ).length;
+  const loadMachineData = useCallback(async () => {
+    setPageError("");
 
-  const errorSlots = slots.filter(
-    (slot) => slot.status === "Error"
-  ).length;
+    try {
+      /*
+       * Load the first configured vending machine.
+       *
+       * We use maybeSingle() so the page still works
+       * even when no machine has been created yet.
+       */
+      const { data: machineData, error: machineError } =
+        await supabase
+          .from("machines")
+          .select(
+            `
+              id,
+              machine_code,
+              name,
+              location,
+              status,
+              last_heartbeat,
+              created_at,
+              updated_at
+            `
+          )
+          .order("created_at", {
+            ascending: true,
+          })
+          .limit(1)
+          .maybeSingle();
 
-  const addEvent = (event) => {
-  const id = nextEventId.current;
-  nextEventId.current += 1;
+      if (machineError) {
+        throw machineError;
+      }
 
-  const newEvent = {
-    ...event,
-    id,
-    time: new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-  };
+      if (!machineData) {
+        setMachine(null);
+        setSlots([]);
+        setEvents([]);
+        return;
+      }
 
-  setEvents((current) => [newEvent, ...current].slice(0, 8));
-};
+      /*
+       * Load vending slots belonging to this machine.
+       *
+       * Product information is loaded through the
+       * product_id foreign-key relationship.
+       */
+      const { data: slotData, error: slotError } =
+        await supabase
+          .from("vending_slots")
+          .select(
+            `
+              id,
+              slot_code,
+              motor_number,
+              quantity,
+              capacity,
+              status,
+              product_id,
+              products (
+                id,
+                name,
+                category,
+                price,
+                status
+              )
+            `
+          )
+          .eq("machine_id", machineData.id)
+          .order("motor_number", {
+            ascending: true,
+          });
 
-  const handleRefreshStatus = () => {
-    addEvent({
-      type: "success",
-      title: "Machine status refreshed",
-      description:
-        "Latest simulated controller status was requested.",
-    });
-  };
+      if (slotError) {
+        throw slotError;
+      }
 
-  const handleConnectionToggle = () => {
-    const nextStatus = !machineOnline;
+      /*
+       * Load the most recent machine events.
+       */
+      const { data: eventData, error: eventError } =
+        await supabase
+          .from("machine_events")
+          .select(
+            `
+              id,
+              event_type,
+              severity,
+              message,
+              slot_id,
+              created_at
+            `
+          )
+          .eq("machine_id", machineData.id)
+          .order("created_at", {
+            ascending: false,
+          })
+          .limit(10);
 
-    setMachineOnline(nextStatus);
+      if (eventError) {
+        throw eventError;
+      }
 
-    addEvent({
-      type: nextStatus ? "success" : "warning",
-      title: nextStatus
-        ? "Controller connected"
-        : "Controller disconnected",
-      description: nextStatus
-        ? "ESP32 simulated connection has been restored."
-        : "ESP32 simulated connection has been disabled.",
-    });
-  };
+      setMachine(machineData);
+      setSlots(slotData ?? []);
+      setEvents(eventData ?? []);
+    } catch (error) {
+      console.error("Unable to load machine data:", error);
 
-  const handleTestSlot = (slot) => {
-    if (!machineOnline) {
-      addEvent({
-        type: "error",
-        title: `${slot.id} test failed`,
-        description:
-          "Cannot test the slot while the ESP32 controller is offline.",
-      });
+      setPageError(
+        error?.message ||
+          "Unable to load vending machine information."
+      );
+    }
+  }, []);
 
-      return;
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initializeMachinePage() {
+      setLoading(true);
+
+      await loadMachineData();
+
+      if (!cancelled) {
+        setLoading(false);
+      }
     }
 
-    setTestingSlot(slot.id);
+    initializeMachinePage();
 
-    setTimeout(() => {
-      setTestingSlot(null);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadMachineData]);
 
-      addEvent({
-        type:
-          slot.status === "Ready" ? "success" : "error",
-        title: `${slot.id} diagnostic completed`,
-        description:
-          slot.status === "Ready"
-            ? `${slot.motor} responded successfully.`
-            : `${slot.motor} reported a simulated hardware error.`,
-      });
-    }, 900);
+  const handleRefreshStatus = async () => {
+    setRefreshing(true);
+
+    await loadMachineData();
+
+    setRefreshing(false);
   };
 
-  const resetSlotError = (slotId) => {
-    setSlots((currentSlots) =>
-      currentSlots.map((slot) =>
-        slot.id === slotId
-          ? { ...slot, status: "Ready" }
-          : slot
-      )
+  /*
+   * Determine whether the machine should be considered
+   * connected.
+   *
+   * For now this is based on the database status.
+   * Later we can also enforce a heartbeat timeout.
+   */
+  const machineOnline =
+    machine?.status?.toLowerCase() === "online";
+
+  const readySlots = useMemo(
+    () =>
+      slots.filter(
+        (slot) =>
+          slot.status?.toLowerCase() === "ready"
+      ).length,
+    [slots]
+  );
+
+  const errorSlots = useMemo(
+    () =>
+      slots.filter(
+        (slot) =>
+          slot.status?.toLowerCase() === "error"
+      ).length,
+    [slots]
+  );
+
+  const disabledSlots = useMemo(
+    () =>
+      slots.filter(
+        (slot) =>
+          slot.status?.toLowerCase() === "disabled"
+      ).length,
+    [slots]
+  );
+
+  const assignedSlots = useMemo(
+    () =>
+      slots.filter((slot) => slot.product_id).length,
+    [slots]
+  );
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center">
+        <div className="text-center">
+          <RefreshCw
+            size={30}
+            className="mx-auto animate-spin text-blue-600"
+          />
+
+          <p className="mt-3 text-sm font-medium text-slate-600">
+            Loading machine information...
+          </p>
+        </div>
+      </div>
     );
-
-    addEvent({
-      type: "success",
-      title: `${slotId} status reset`,
-      description:
-        "The simulated motor error has been cleared.",
-    });
-
-    setSelectedSlot(null);
-  };
+  }
 
   return (
     <div>
@@ -203,391 +253,484 @@ export default function Machine() {
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Monitor the vending machine controller,
-            card reader, and dispensing slots.
+            Monitor the vending machine, dispensing slots,
+            inventory, and hardware events.
           </p>
         </div>
 
         <button
+          type="button"
           onClick={handleRefreshStatus}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          disabled={refreshing}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <RefreshCw size={17} />
-          Refresh Status
+          <RefreshCw
+            size={17}
+            className={
+              refreshing ? "animate-spin" : ""
+            }
+          />
+
+          {refreshing
+            ? "Refreshing..."
+            : "Refresh Status"}
         </button>
       </div>
 
-      {/* Machine Status Banner */}
-      <div
-        className={`mt-8 rounded-2xl border p-5 ${
-          machineOnline
-            ? "border-green-200 bg-green-50"
-            : "border-red-200 bg-red-50"
-        }`}
-      >
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-4">
-            <div
-              className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-                machineOnline
-                  ? "bg-green-100 text-green-600"
-                  : "bg-red-100 text-red-600"
-              }`}
-            >
-              {machineOnline ? (
-                <Wifi size={23} />
-              ) : (
-                <WifiOff size={23} />
-              )}
-            </div>
+      {/* Error */}
+      {pageError && (
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+          <XCircle
+            size={20}
+            className="mt-0.5 shrink-0 text-red-600"
+          />
 
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="font-semibold text-slate-900">
-                  SmartVend Machine 01
-                </h2>
-
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                    machineOnline
-                      ? "bg-green-100 text-green-700"
-                      : "bg-red-100 text-red-700"
-                  }`}
-                >
-                  {machineOnline ? "Online" : "Offline"}
-                </span>
-              </div>
-
-              <p className="mt-1 text-sm text-slate-500">
-                {machineOnline
-                  ? "Controller is connected and responding."
-                  : "Controller is currently disconnected."}
-              </p>
-            </div>
-          </div>
-
-          {/* Temporary Simulation */}
-          <button
-            onClick={handleConnectionToggle}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            {machineOnline
-              ? "Simulate Offline"
-              : "Simulate Online"}
-          </button>
-        </div>
-      </div>
-
-      {/* Status Cards */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatusCard
-          title="ESP32 Controller"
-          value={machineOnline ? "Online" : "Offline"}
-          description="MicroPython controller"
-          icon={Cpu}
-          status={machineOnline ? "success" : "error"}
-        />
-
-        <StatusCard
-          title="RFID / NFC Reader"
-          value={readerOnline ? "Ready" : "Offline"}
-          description="Student ID reader"
-          icon={Radio}
-          status={readerOnline ? "success" : "error"}
-        />
-
-        <StatusCard
-          title="Ready Slots"
-          value={`${readySlots}/${slots.length}`}
-          description="Dispensing motors ready"
-          icon={CheckCircle2}
-          status="success"
-        />
-
-        <StatusCard
-          title="Hardware Errors"
-          value={errorSlots}
-          description="Slots requiring attention"
-          icon={Activity}
-          status={errorSlots > 0 ? "error" : "success"}
-        />
-      </div>
-
-      {/* Device Information */}
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_1.5fr]">
-        <div className="rounded-2xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 px-6 py-5">
-            <h2 className="font-semibold text-slate-900">
-              Controller Information
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              ESP32 device and network information
+          <div>
+            <p className="text-sm font-semibold text-red-800">
+              Unable to load machine information
             </p>
-          </div>
 
-          <div className="divide-y divide-slate-100 px-6">
-            <InfoRow
-              icon={Cpu}
-              label="Controller"
-              value="ESP32"
-            />
-
-            <InfoRow
-              icon={Gauge}
-              label="Firmware"
-              value="MicroPython"
-            />
-
-            <InfoRow
-              icon={Router}
-              label="Connection"
-              value="Wi-Fi"
-            />
-
-            <InfoRow
-              icon={Wifi}
-              label="IP Address"
-              value={
-                machineOnline
-                  ? "192.168.1.120"
-                  : "Unavailable"
-              }
-            />
-
-            <InfoRow
-              icon={Activity}
-              label="Last Heartbeat"
-              value={
-                machineOnline
-                  ? "Just now"
-                  : "Not available"
-              }
-            />
-          </div>
-
-          <div className="border-t border-slate-200 bg-slate-50 px-6 py-4">
-            <p className="text-xs leading-5 text-slate-500">
-              Device information is currently simulated.
-              The ESP32 will later send real status data
-              using MicroPython developed in Thonny.
+            <p className="mt-1 text-sm text-red-700">
+              {pageError}
             </p>
-          </div>
-        </div>
-
-        {/* Slots */}
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 px-6 py-5">
-            <h2 className="font-semibold text-slate-900">
-              Dispensing Slots
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Monitor motors assigned to vending slots
-            </p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-6 py-3 font-medium">
-                    Slot
-                  </th>
-
-                  <th className="px-6 py-3 font-medium">
-                    Product
-                  </th>
-
-                  <th className="px-6 py-3 font-medium">
-                    Motor
-                  </th>
-
-                  <th className="px-6 py-3 font-medium">
-                    Status
-                  </th>
-
-                  <th className="px-6 py-3 text-right font-medium">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-100">
-                {slots.map((slot) => (
-                  <tr
-                    key={slot.id}
-                    className="transition hover:bg-slate-50"
-                  >
-                    <td className="px-6 py-4">
-                      <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-sm font-bold text-slate-700">
-                        {slot.id}
-                      </span>
-                    </td>
-
-                    <td className="px-6 py-4">
-                      <p className="text-sm font-semibold text-slate-800">
-                        {slot.product}
-                      </p>
-                    </td>
-
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {slot.motor}
-                    </td>
-
-                    <td className="px-6 py-4">
-                      <SlotStatus status={slot.status} />
-                    </td>
-
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() =>
-                            handleTestSlot(slot)
-                          }
-                          disabled={
-                            testingSlot === slot.id
-                          }
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <TestTube2 size={14} />
-
-                          {testingSlot === slot.id
-                            ? "Testing..."
-                            : "Test"}
-                        </button>
-
-                        {slot.status === "Error" && (
-                          <button
-                            onClick={() =>
-                              setSelectedSlot(slot)
-                            }
-                            className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100"
-                          >
-                            Resolve
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      {/* Machine Events */}
-      <div className="mt-6 rounded-2xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-6 py-5">
-          <h2 className="font-semibold text-slate-900">
-            Recent Machine Events
-          </h2>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Controller, reader, and motor activity
-          </p>
-        </div>
-
-        <div className="divide-y divide-slate-100">
-          {events.map((event) => (
-            <div
-              key={event.id}
-              className="flex items-start justify-between gap-4 px-6 py-4"
-            >
-              <div className="flex items-start gap-3">
-                <EventIcon type={event.type} />
-
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">
-                    {event.title}
-                  </p>
-
-                  <p className="mt-1 text-sm text-slate-500">
-                    {event.description}
-                  </p>
-                </div>
-              </div>
-
-              <span className="shrink-0 text-xs text-slate-400">
-                {event.time}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Resolve Error Modal */}
-      {selectedSlot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
-              <div>
-                <h2 className="font-semibold text-slate-900">
-                  Resolve Slot Error
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedSlot.id} ·{" "}
-                  {selectedSlot.motor}
-                </p>
-              </div>
-
-              <button
-                onClick={() => setSelectedSlot(null)}
-                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-              >
-                <X size={19} />
-              </button>
-            </div>
-
-            <div className="p-6">
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                <div className="flex gap-3">
-                  <Zap
-                    size={19}
-                    className="mt-0.5 shrink-0 text-amber-600"
-                  />
-
-                  <div>
-                    <p className="text-sm font-semibold text-amber-800">
-                      Simulated hardware error
-                    </p>
-
-                    <p className="mt-1 text-sm leading-6 text-amber-700">
-                      Resetting this status only changes
-                      the frontend simulation. Later,
-                      hardware errors must be verified by
-                      the ESP32 before they are marked as
-                      resolved.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end gap-3">
-                <button
-                  onClick={() =>
-                    setSelectedSlot(null)
-                  }
-                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  onClick={() =>
-                    resetSlotError(selectedSlot.id)
-                  }
-                  className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-                >
-                  Reset Status
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}
+
+      {!machine ? (
+        <NoMachineState />
+      ) : (
+        <>
+          {/* Machine Status Banner */}
+          <div
+            className={`mt-8 rounded-2xl border p-5 ${
+              machineOnline
+                ? "border-green-200 bg-green-50"
+                : "border-slate-200 bg-slate-50"
+            }`}
+          >
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+              <div className="flex items-center gap-4">
+                <div
+                  className={`flex h-12 w-12 items-center justify-center rounded-xl ${
+                    machineOnline
+                      ? "bg-green-100 text-green-600"
+                      : "bg-slate-200 text-slate-500"
+                  }`}
+                >
+                  {machineOnline ? (
+                    <Wifi size={23} />
+                  ) : (
+                    <WifiOff size={23} />
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-semibold text-slate-900">
+                      {machine.name}
+                    </h2>
+
+                    <MachineStatusBadge
+                      status={machine.status}
+                    />
+                  </div>
+
+                  <p className="mt-1 text-sm text-slate-500">
+                    {machineOnline
+                      ? "The machine is reporting an online status."
+                      : "Physical ESP32-S3 hardware is not connected yet."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-left sm:text-right">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Machine Code
+                </p>
+
+                <p className="mt-1 text-sm font-semibold text-slate-700">
+                  {machine.machine_code}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Status Cards */}
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatusCard
+              title="ESP32-S3 Controller"
+              value={
+                machineOnline
+                  ? "Connected"
+                  : "Not Connected"
+              }
+              description="Physical controller status"
+              icon={Cpu}
+              status={
+                machineOnline ? "success" : "neutral"
+              }
+            />
+
+            <StatusCard
+              title="Configured Slots"
+              value={slots.length}
+              description={`${assignedSlots} assigned to products`}
+              icon={Package}
+              status="success"
+            />
+
+            <StatusCard
+              title="Ready Slots"
+              value={`${readySlots}/${slots.length}`}
+              description="Slots marked ready"
+              icon={CheckCircle2}
+              status="success"
+            />
+
+            <StatusCard
+              title="Slot Errors"
+              value={errorSlots}
+              description={
+                disabledSlots > 0
+                  ? `${disabledSlots} disabled slot${
+                      disabledSlots === 1 ? "" : "s"
+                    }`
+                  : "No disabled slots"
+              }
+              icon={Activity}
+              status={
+                errorSlots > 0 ? "error" : "success"
+              }
+            />
+          </div>
+
+          {/* Main Information */}
+          <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_1.6fr]">
+            {/* Controller Information */}
+            <div className="rounded-2xl border border-slate-200 bg-white">
+              <div className="border-b border-slate-200 px-6 py-5">
+                <h2 className="font-semibold text-slate-900">
+                  Machine Information
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Database and future hardware information
+                </p>
+              </div>
+
+              <div className="divide-y divide-slate-100 px-6">
+                <InfoRow
+                  icon={Cpu}
+                  label="Controller"
+                  value="ESP32-S3"
+                />
+
+                <InfoRow
+                  icon={Gauge}
+                  label="Firmware"
+                  value="Not configured"
+                />
+
+                <InfoRow
+                  icon={Router}
+                  label="Connection"
+                  value="Not connected"
+                />
+
+                <InfoRow
+                  icon={Radio}
+                  label="RFID / NFC Reader"
+                  value="Not connected"
+                />
+
+                <InfoRow
+                  icon={Database}
+                  label="Database"
+                  value="Supabase connected"
+                />
+
+                <InfoRow
+                  icon={Activity}
+                  label="Last Heartbeat"
+                  value={formatHeartbeat(
+                    machine.last_heartbeat
+                  )}
+                />
+
+                <InfoRow
+                  icon={Package}
+                  label="Location"
+                  value={
+                    machine.location ||
+                    "Not specified"
+                  }
+                />
+              </div>
+
+              <div className="border-t border-slate-200 bg-slate-50 px-6 py-4">
+                <p className="text-xs leading-5 text-slate-500">
+                  The web application and database are
+                  operational. ESP32-S3, RFID/NFC reader,
+                  motors, sensors, and other physical
+                  hardware will be connected during the
+                  hardware integration phase.
+                </p>
+              </div>
+            </div>
+
+            {/* Slots */}
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="border-b border-slate-200 px-6 py-5">
+                <h2 className="font-semibold text-slate-900">
+                  Dispensing Slots
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Database-backed slot and motor
+                  configuration
+                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-6 py-3 font-medium">
+                        Slot
+                      </th>
+
+                      <th className="px-6 py-3 font-medium">
+                        Product
+                      </th>
+
+                      <th className="px-6 py-3 font-medium">
+                        Motor
+                      </th>
+
+                      <th className="px-6 py-3 font-medium">
+                        Stock
+                      </th>
+
+                      <th className="px-6 py-3 font-medium">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100">
+                    {slots.map((slot) => (
+                      <tr
+                        key={slot.id}
+                        className="transition hover:bg-slate-50"
+                      >
+                        <td className="px-6 py-4">
+                          <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-sm font-bold text-slate-700">
+                            {slot.slot_code}
+                          </span>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          {slot.products ? (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800">
+                                {
+                                  slot.products
+                                    .name
+                                }
+                              </p>
+
+                              <p className="mt-1 text-xs text-slate-400">
+                                {
+                                  slot.products
+                                    .category
+                                }
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-slate-400">
+                              No product assigned
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <span className="text-sm font-medium text-slate-600">
+                            Motor{" "}
+                            {slot.motor_number}
+                          </span>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">
+                              {slot.quantity}/
+                              {slot.capacity}
+                            </p>
+
+                            <StockBar
+                              quantity={
+                                slot.quantity
+                              }
+                              capacity={
+                                slot.capacity
+                              }
+                            />
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <SlotStatus
+                            status={slot.status}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {slots.length === 0 && (
+                  <div className="px-6 py-14 text-center">
+                    <Package
+                      size={34}
+                      className="mx-auto text-slate-300"
+                    />
+
+                    <p className="mt-3 font-medium text-slate-700">
+                      No vending slots configured
+                    </p>
+
+                    <p className="mt-1 text-sm text-slate-400">
+                      Configure slots in the inventory
+                      system first.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Hardware Integration Notice */}
+          <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+            <div className="flex items-start gap-3">
+              <Cpu
+                size={21}
+                className="mt-0.5 shrink-0 text-blue-600"
+              />
+
+              <div>
+                <p className="font-semibold text-blue-900">
+                  Hardware Integration Pending
+                </p>
+
+                <p className="mt-1 max-w-4xl text-sm leading-6 text-blue-700">
+                  The database configuration is ready for
+                  the vending machine. During the hardware
+                  phase, the ESP32-S3 will report
+                  heartbeats, machine state, slot errors,
+                  RFID/NFC activity, and dispensing events.
+                  The final firmware technology will be
+                  selected based on the hardware and
+                  reliability requirements.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Machine Events */}
+          <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-6 py-5">
+              <h2 className="font-semibold text-slate-900">
+                Recent Machine Events
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Latest events recorded by the vending
+                machine system
+              </p>
+            </div>
+
+            {events.length > 0 ? (
+              <div className="divide-y divide-slate-100">
+                {events.map((event) => (
+                  <div
+                    key={event.id}
+                    className="flex flex-col justify-between gap-3 px-6 py-4 sm:flex-row sm:items-start"
+                  >
+                    <div className="flex items-start gap-3">
+                      <EventIcon
+                        severity={event.severity}
+                      />
+
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-800">
+                            {formatEventType(
+                              event.event_type
+                            )}
+                          </p>
+
+                          <EventSeverityBadge
+                            severity={
+                              event.severity
+                            }
+                          />
+                        </div>
+
+                        <p className="mt-1 text-sm leading-6 text-slate-500">
+                          {event.message}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="shrink-0 text-xs text-slate-400">
+                      {formatDateTime(
+                        event.created_at
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-6 py-14 text-center">
+                <Activity
+                  size={34}
+                  className="mx-auto text-slate-300"
+                />
+
+                <p className="mt-3 font-medium text-slate-700">
+                  No machine events recorded
+                </p>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Hardware events will appear here after
+                  integration.
+                </p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function NoMachineState() {
+  return (
+    <div className="mt-8 rounded-2xl border border-slate-200 bg-white px-6 py-16 text-center">
+      <Cpu
+        size={42}
+        className="mx-auto text-slate-300"
+      />
+
+      <h2 className="mt-4 text-lg font-semibold text-slate-800">
+        No vending machine configured
+      </h2>
+
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+        Create a machine record in Supabase before
+        connecting the ESP32-S3 and vending hardware.
+      </p>
     </div>
   );
 }
@@ -599,7 +742,12 @@ function StatusCard({
   icon: Icon,
   status,
 }) {
-  const isSuccess = status === "success";
+  const styles = {
+    success: "bg-green-50 text-green-600",
+    error: "bg-red-50 text-red-600",
+    warning: "bg-amber-50 text-amber-600",
+    neutral: "bg-slate-100 text-slate-500",
+  };
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
@@ -620,9 +768,7 @@ function StatusCard({
 
         <div
           className={`flex h-11 w-11 items-center justify-center rounded-xl ${
-            isSuccess
-              ? "bg-green-50 text-green-600"
-              : "bg-red-50 text-red-600"
+            styles[status] ?? styles.neutral
           }`}
         >
           <Icon size={20} />
@@ -645,50 +791,219 @@ function InfoRow({ icon: Icon, label, value }) {
         </span>
       </div>
 
-      <span className="text-right text-sm font-semibold text-slate-800">
+      <span className="max-w-[55%] text-right text-sm font-semibold text-slate-800">
         {value}
       </span>
     </div>
   );
 }
 
-function SlotStatus({ status }) {
-  const isReady = status === "Ready";
+function MachineStatusBadge({ status }) {
+  const normalizedStatus =
+    status?.toLowerCase() ?? "offline";
+
+  const config = {
+    online: {
+      label: "Online",
+      className:
+        "bg-green-100 text-green-700",
+    },
+
+    offline: {
+      label: "Offline",
+      className:
+        "bg-slate-200 text-slate-600",
+    },
+
+    maintenance: {
+      label: "Maintenance",
+      className:
+        "bg-amber-100 text-amber-700",
+    },
+  };
+
+  const current =
+    config[normalizedStatus] ?? config.offline;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-        isReady
-          ? "bg-green-50 text-green-700"
-          : "bg-red-50 text-red-700"
-      }`}
+      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${current.className}`}
     >
-      <CircleDot size={12} />
-      {status}
+      {current.label}
     </span>
   );
 }
 
-function EventIcon({ type }) {
-  if (type === "error") {
+function SlotStatus({ status }) {
+  const normalizedStatus =
+    status?.toLowerCase() ?? "disabled";
+
+  const config = {
+    ready: {
+      label: "Ready",
+      className:
+        "bg-green-50 text-green-700",
+    },
+
+    error: {
+      label: "Error",
+      className:
+        "bg-red-50 text-red-700",
+    },
+
+    disabled: {
+      label: "Disabled",
+      className:
+        "bg-slate-100 text-slate-600",
+    },
+  };
+
+  const current =
+    config[normalizedStatus] ?? config.disabled;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${current.className}`}
+    >
+      <CircleDot size={12} />
+      {current.label}
+    </span>
+  );
+}
+
+function StockBar({ quantity, capacity }) {
+  const safeCapacity =
+    Number(capacity) > 0 ? Number(capacity) : 1;
+
+  const safeQuantity = Math.max(
+    0,
+    Number(quantity) || 0
+  );
+
+  const percentage = Math.min(
+    100,
+    (safeQuantity / safeCapacity) * 100
+  );
+
+  let barClass = "bg-green-500";
+
+  if (safeQuantity === 0) {
+    barClass = "bg-red-500";
+  } else if (percentage <= 30) {
+    barClass = "bg-amber-500";
+  }
+
+  return (
+    <div className="mt-2 h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+      <div
+        className={`h-full rounded-full ${barClass}`}
+        style={{
+          width: `${percentage}%`,
+        }}
+      />
+    </div>
+  );
+}
+
+function EventIcon({ severity }) {
+  const normalizedSeverity =
+    severity?.toLowerCase() ?? "info";
+
+  if (normalizedSeverity === "error") {
     return (
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
-        <X size={17} />
+        <XCircle size={17} />
       </div>
     );
   }
 
-  if (type === "warning") {
+  if (normalizedSeverity === "warning") {
     return (
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
-        <Activity size={17} />
+        <AlertTriangle size={17} />
       </div>
     );
   }
 
   return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-50 text-green-600">
-      <CheckCircle2 size={17} />
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+      <Activity size={17} />
     </div>
   );
+}
+
+function EventSeverityBadge({ severity }) {
+  const normalizedSeverity =
+    severity?.toLowerCase() ?? "info";
+
+  const config = {
+    info: {
+      label: "Info",
+      className:
+        "bg-blue-50 text-blue-700",
+    },
+
+    warning: {
+      label: "Warning",
+      className:
+        "bg-amber-50 text-amber-700",
+    },
+
+    error: {
+      label: "Error",
+      className:
+        "bg-red-50 text-red-700",
+    },
+  };
+
+  const current =
+    config[normalizedSeverity] ?? config.info;
+
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${current.className}`}
+    >
+      {current.label}
+    </span>
+  );
+}
+
+function formatHeartbeat(value) {
+  if (!value) {
+    return "No heartbeat yet";
+  }
+
+  return formatDateTime(value);
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatEventType(value) {
+  if (!value) {
+    return "Machine Event";
+  }
+
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) =>
+      character.toUpperCase()
+    );
 }
