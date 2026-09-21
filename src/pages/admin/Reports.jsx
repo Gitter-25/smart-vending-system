@@ -7,7 +7,12 @@ import {
   ShoppingBag,
   TrendingUp,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Bar,
   BarChart,
@@ -20,141 +25,367 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-
-const salesData = [
-  {
-    day: "Sep 14",
-    sales: 120.5,
-    transactions: 5,
-  },
-  {
-    day: "Sep 15",
-    sales: 185.75,
-    transactions: 8,
-  },
-  {
-    day: "Sep 16",
-    sales: 95.25,
-    transactions: 4,
-  },
-  {
-    day: "Sep 17",
-    sales: 230.5,
-    transactions: 10,
-  },
-  {
-    day: "Sep 18",
-    sales: 175,
-    transactions: 7,
-  },
-  {
-    day: "Sep 19",
-    sales: 310.75,
-    transactions: 13,
-  },
-  {
-    day: "Sep 20",
-    sales: 85.75,
-    transactions: 6,
-  },
-];
-
-const productSales = [
-  {
-    product: "Bottled Water",
-    quantity: 18,
-    revenue: 360,
-  },
-  {
-    product: "Iced Tea",
-    quantity: 14,
-    revenue: 350,
-  },
-  {
-    product: "Chocolate Bar",
-    quantity: 11,
-    revenue: 390.5,
-  },
-  {
-    product: "Potato Chips",
-    quantity: 9,
-    revenue: 272.25,
-  },
-  {
-    product: "Orange Juice",
-    quantity: 7,
-    revenue: 210,
-  },
-];
-
-const transactionStatusData = [
-  {
-    name: "Success",
-    value: 46,
-  },
-  {
-    name: "Failed",
-    value: 5,
-  },
-  {
-    name: "Pending",
-    value: 2,
-  },
-];
+import { supabase } from "../../lib/supabase";
 
 const chartColors = [
   "#2563eb",
   "#ef4444",
   "#f59e0b",
+  "#8b5cf6",
 ];
 
-const reportRanges = {
-  Today: {
-    sales: 85.75,
-    transactions: 6,
-    itemsSold: 3,
-    successfulTransactions: 3,
-  },
+const dateRangeOptions = [
+  "Today",
+  "Last 7 Days",
+  "Last 30 Days",
+  "This Month",
+];
 
-  "Last 7 Days": {
-    sales: 1203.5,
-    transactions: 53,
-    itemsSold: 49,
-    successfulTransactions: 46,
-  },
+function getStartDate(dateRange) {
+  const now = new Date();
 
-  "Last 30 Days": {
-    sales: 5240.75,
-    transactions: 218,
-    itemsSold: 201,
-    successfulTransactions: 194,
-  },
+  if (dateRange === "Today") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
 
-  "This Month": {
-    sales: 3865.25,
-    transactions: 164,
-    itemsSold: 151,
-    successfulTransactions: 147,
-  },
-};
+  if (dateRange === "Last 7 Days") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+
+  if (dateRange === "Last 30 Days") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 29);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+
+  if (dateRange === "This Month") {
+    return new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1
+    );
+  }
+
+  return null;
+}
+
+function formatChartDate(date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function formatCurrency(value) {
+  return `₱${Number(value || 0).toFixed(2)}`;
+}
+
+function buildSalesData(
+  transactions,
+  dateRange
+) {
+  const successfulTransactions =
+    transactions.filter(
+      (transaction) =>
+        transaction.status === "success"
+    );
+
+  const startDate = getStartDate(dateRange);
+  const now = new Date();
+
+  if (!startDate) {
+    return [];
+  }
+
+  const dailyMap = new Map();
+
+  const currentDate = new Date(startDate);
+
+  while (currentDate <= now) {
+    const dateKey = [
+      currentDate.getFullYear(),
+      String(
+        currentDate.getMonth() + 1
+      ).padStart(2, "0"),
+      String(currentDate.getDate()).padStart(
+        2,
+        "0"
+      ),
+    ].join("-");
+
+    dailyMap.set(dateKey, {
+      day: formatChartDate(currentDate),
+      sales: 0,
+      transactions: 0,
+    });
+
+    currentDate.setDate(
+      currentDate.getDate() + 1
+    );
+  }
+
+  successfulTransactions.forEach(
+    (transaction) => {
+      const transactionDate = new Date(
+        transaction.created_at
+      );
+
+      const dateKey = [
+        transactionDate.getFullYear(),
+        String(
+          transactionDate.getMonth() + 1
+        ).padStart(2, "0"),
+        String(
+          transactionDate.getDate()
+        ).padStart(2, "0"),
+      ].join("-");
+
+      const dayData = dailyMap.get(dateKey);
+
+      if (!dayData) {
+        return;
+      }
+
+      dayData.sales += Number(
+        transaction.amount || 0
+      );
+
+      dayData.transactions += 1;
+    }
+  );
+
+  return Array.from(dailyMap.values()).map(
+    (item) => ({
+      ...item,
+      sales: Number(item.sales.toFixed(2)),
+    })
+  );
+}
+
+function buildProductSales(transactions) {
+  const productMap = new Map();
+
+  transactions
+    .filter(
+      (transaction) =>
+        transaction.status === "success"
+    )
+    .forEach((transaction) => {
+      const productName =
+        transaction.product_name ||
+        "Unknown Product";
+
+      const existing =
+        productMap.get(productName) || {
+          product: productName,
+          quantity: 0,
+          revenue: 0,
+        };
+
+      existing.quantity += 1;
+      existing.revenue += Number(
+        transaction.amount || 0
+      );
+
+      productMap.set(productName, existing);
+    });
+
+  return Array.from(productMap.values())
+    .map((product) => ({
+      ...product,
+      revenue: Number(
+        product.revenue.toFixed(2)
+      ),
+    }))
+    .sort((a, b) => {
+      if (b.quantity !== a.quantity) {
+        return b.quantity - a.quantity;
+      }
+
+      return b.revenue - a.revenue;
+    });
+}
+
+function buildTransactionStatusData(
+  transactions
+) {
+  const statusCounts = {
+    Success: 0,
+    Failed: 0,
+    Pending: 0,
+    Refunded: 0,
+  };
+
+  transactions.forEach((transaction) => {
+    if (transaction.status === "success") {
+      statusCounts.Success += 1;
+    } else if (
+      transaction.status === "failed"
+    ) {
+      statusCounts.Failed += 1;
+    } else if (
+      transaction.status === "pending"
+    ) {
+      statusCounts.Pending += 1;
+    } else if (
+      transaction.status === "refunded"
+    ) {
+      statusCounts.Refunded += 1;
+    }
+  });
+
+  return Object.entries(statusCounts)
+    .map(([name, value]) => ({
+      name,
+      value,
+    }))
+    .filter((item) => item.value > 0);
+}
 
 export default function Reports() {
   const [dateRange, setDateRange] =
     useState("Last 7 Days");
 
-  const report = reportRanges[dateRange];
+  const [transactions, setTransactions] =
+    useState([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [pageError, setPageError] =
+    useState("");
+
+  const loadReportData = useCallback(
+    async () => {
+      setLoading(true);
+      setPageError("");
+
+      try {
+        const startDate =
+          getStartDate(dateRange);
+
+        let query = supabase
+          .from("vending_transactions")
+          .select(
+            `
+              id,
+              transaction_code,
+              product_name,
+              amount,
+              status,
+              created_at,
+              completed_at,
+              product_id
+            `
+          )
+          .order("created_at", {
+            ascending: true,
+          });
+
+        if (startDate) {
+          query = query.gte(
+            "created_at",
+            startDate.toISOString()
+          );
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          throw error;
+        }
+
+        setTransactions(data || []);
+      } catch (error) {
+        console.error(
+          "Unable to load report data:",
+          error
+        );
+
+        setPageError(
+          error.message ||
+            "Unable to load report data."
+        );
+
+        setTransactions([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [dateRange]
+  );
+
+  useEffect(() => {
+    loadReportData();
+  }, [loadReportData]);
+
+  const successfulTransactions =
+    useMemo(
+      () =>
+        transactions.filter(
+          (transaction) =>
+            transaction.status === "success"
+        ),
+      [transactions]
+    );
+
+  const totalSales = useMemo(
+    () =>
+      successfulTransactions.reduce(
+        (total, transaction) =>
+          total +
+          Number(transaction.amount || 0),
+        0
+      ),
+    [successfulTransactions]
+  );
+
+  const itemsSold =
+    successfulTransactions.length;
 
   const successRate = useMemo(() => {
-    if (report.transactions === 0) {
+    if (transactions.length === 0) {
       return 0;
     }
 
     return (
-      (report.successfulTransactions /
-        report.transactions) *
+      (successfulTransactions.length /
+        transactions.length) *
       100
     );
-  }, [report]);
+  }, [
+    transactions,
+    successfulTransactions,
+  ]);
+
+  const salesData = useMemo(
+    () =>
+      buildSalesData(
+        transactions,
+        dateRange
+      ),
+    [transactions, dateRange]
+  );
+
+  const productSales = useMemo(
+    () => buildProductSales(transactions),
+    [transactions]
+  );
+
+  const transactionStatusData =
+    useMemo(
+      () =>
+        buildTransactionStatusData(
+          transactions
+        ),
+      [transactions]
+    );
 
   const totalStatusTransactions =
     transactionStatusData.reduce(
@@ -172,12 +403,12 @@ export default function Reports() {
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Review vending machine sales, products, and
-            transaction performance.
+            Review vending machine sales,
+            products, and transaction
+            performance.
           </p>
         </div>
 
-        {/* Date Range */}
         <div>
           <label
             htmlFor="report-range"
@@ -192,53 +423,73 @@ export default function Reports() {
             onChange={(event) =>
               setDateRange(event.target.value)
             }
-            className="min-w-44 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            disabled={loading}
+            className="min-w-44 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <option value="Today">
-              Today
-            </option>
-
-            <option value="Last 7 Days">
-              Last 7 Days
-            </option>
-
-            <option value="Last 30 Days">
-              Last 30 Days
-            </option>
-
-            <option value="This Month">
-              This Month
-            </option>
+            {dateRangeOptions.map(
+              (option) => (
+                <option
+                  key={option}
+                  value={option}
+                >
+                  {option}
+                </option>
+              )
+            )}
           </select>
         </div>
       </div>
+
+      {/* Error */}
+      {pageError && (
+        <div
+          role="alert"
+          className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {pageError}
+        </div>
+      )}
 
       {/* Statistics */}
       <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <ReportStatCard
           title="Total Sales"
-          value={`₱${report.sales.toFixed(2)}`}
+          value={
+            loading
+              ? "..."
+              : formatCurrency(totalSales)
+          }
           description={dateRange}
           icon={PhilippinePeso}
         />
 
         <ReportStatCard
           title="Transactions"
-          value={report.transactions}
+          value={
+            loading
+              ? "..."
+              : transactions.length
+          }
           description="Recorded purchases"
           icon={CreditCard}
         />
 
         <ReportStatCard
           title="Items Sold"
-          value={report.itemsSold}
+          value={
+            loading ? "..." : itemsSold
+          }
           description="Successfully dispensed"
           icon={ShoppingBag}
         />
 
         <ReportStatCard
           title="Success Rate"
-          value={`${successRate.toFixed(1)}%`}
+          value={
+            loading
+              ? "..."
+              : `${successRate.toFixed(1)}%`
+          }
           description="Successful transactions"
           icon={CheckCircle2}
         />
@@ -255,76 +506,95 @@ export default function Reports() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                Daily vending machine sales
+                Daily successful vending
+                machine sales
               </p>
             </div>
 
             <div className="flex items-center gap-2 text-sm font-medium text-green-600">
               <TrendingUp size={17} />
-              Sales activity
+              Live transaction data
             </div>
           </div>
 
           <div className="h-80 p-5">
-            <ResponsiveContainer
-              width="100%"
-              height="100%"
-            >
-              <BarChart
-                data={salesData}
-                margin={{
-                  top: 10,
-                  right: 10,
-                  left: 0,
-                  bottom: 0,
-                }}
+            {loading ? (
+              <ChartLoading />
+            ) : salesData.length === 0 ? (
+              <ChartEmptyState />
+            ) : (
+              <ResponsiveContainer
+                width="100%"
+                height="100%"
               >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  stroke="#e2e8f0"
-                />
-
-                <XAxis
-                  dataKey="day"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{
-                    fill: "#64748b",
-                    fontSize: 12,
+                <BarChart
+                  data={salesData}
+                  margin={{
+                    top: 10,
+                    right: 10,
+                    left: 0,
+                    bottom: 0,
                   }}
-                />
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke="#e2e8f0"
+                  />
 
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{
-                    fill: "#64748b",
-                    fontSize: 12,
-                  }}
-                  tickFormatter={(value) =>
-                    `₱${value}`
-                  }
-                />
+                  <XAxis
+                    dataKey="day"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{
+                      fill: "#64748b",
+                      fontSize: 12,
+                    }}
+                  />
 
-                <Tooltip
-                  formatter={(value) => [
-                    `₱${Number(value).toFixed(2)}`,
-                    "Sales",
-                  ]}
-                  contentStyle={{
-                    borderRadius: "12px",
-                    border: "1px solid #e2e8f0",
-                  }}
-                />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{
+                      fill: "#64748b",
+                      fontSize: 12,
+                    }}
+                    tickFormatter={(value) =>
+                      `₱${value}`
+                    }
+                  />
 
-                <Bar
-                  dataKey="sales"
-                  fill="#2563eb"
-                  radius={[6, 6, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+                  <Tooltip
+                    formatter={(
+                      value,
+                      name
+                    ) => {
+                      if (name === "sales") {
+                        return [
+                          formatCurrency(
+                            value
+                          ),
+                          "Sales",
+                        ];
+                      }
+
+                      return [value, name];
+                    }}
+                    contentStyle={{
+                      borderRadius: "12px",
+                      border:
+                        "1px solid #e2e8f0",
+                    }}
+                  />
+
+                  <Bar
+                    dataKey="sales"
+                    fill="#2563eb"
+                    radius={[6, 6, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -342,88 +612,104 @@ export default function Reports() {
 
           <div className="p-5">
             <div className="h-52">
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-              >
-                <PieChart>
-                  <Pie
-                    data={transactionStatusData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={80}
-                    paddingAngle={4}
-                  >
-                    {transactionStatusData.map(
-                      (entry, index) => (
-                        <Cell
-                          key={entry.name}
-                          fill={
-                            chartColors[
-                              index %
-                                chartColors.length
-                            ]
-                          }
-                        />
-                      )
-                    )}
-                  </Pie>
-
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Legend */}
-            <div className="space-y-3">
-              {transactionStatusData.map(
-                (item, index) => {
-                  const percentage =
-                    totalStatusTransactions > 0
-                      ? (item.value /
-                          totalStatusTransactions) *
-                        100
-                      : 0;
-
-                  return (
-                    <div
-                      key={item.name}
-                      className="flex items-center justify-between"
+              {loading ? (
+                <ChartLoading />
+              ) : transactionStatusData.length ===
+                0 ? (
+                <ChartEmptyState />
+              ) : (
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
+                >
+                  <PieChart>
+                    <Pie
+                      data={
+                        transactionStatusData
+                      }
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={55}
+                      outerRadius={80}
+                      paddingAngle={4}
                     >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{
-                            backgroundColor:
+                      {transactionStatusData.map(
+                        (entry, index) => (
+                          <Cell
+                            key={entry.name}
+                            fill={
                               chartColors[
                                 index %
                                   chartColors.length
-                              ],
-                          }}
-                        />
+                              ]
+                            }
+                          />
+                        )
+                      )}
+                    </Pie>
 
-                        <span className="text-sm text-slate-600">
-                          {item.name}
-                        </span>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="text-sm font-semibold text-slate-800">
-                          {item.value}
-                        </span>
-
-                        <span className="ml-2 text-xs text-slate-400">
-                          {percentage.toFixed(1)}%
-                        </span>
-                      </div>
-                    </div>
-                  );
-                }
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
               )}
             </div>
+
+            {!loading &&
+              transactionStatusData.length >
+                0 && (
+                <div className="space-y-3">
+                  {transactionStatusData.map(
+                    (item, index) => {
+                      const percentage =
+                        totalStatusTransactions >
+                        0
+                          ? (item.value /
+                              totalStatusTransactions) *
+                            100
+                          : 0;
+
+                      return (
+                        <div
+                          key={item.name}
+                          className="flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full"
+                              style={{
+                                backgroundColor:
+                                  chartColors[
+                                    index %
+                                      chartColors.length
+                                  ],
+                              }}
+                            />
+
+                            <span className="text-sm text-slate-600">
+                              {item.name}
+                            </span>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="text-sm font-semibold text-slate-800">
+                              {item.value}
+                            </span>
+
+                            <span className="ml-2 text-xs text-slate-400">
+                              {percentage.toFixed(
+                                1
+                              )}
+                              %
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+              )}
           </div>
         </div>
       </div>
@@ -438,71 +724,104 @@ export default function Reports() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Product performance by quantity sold
+              Product performance by
+              successful purchases
             </p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-6 py-3 font-medium">
-                    Product
-                  </th>
+          {loading ? (
+            <div className="flex min-h-52 items-center justify-center px-6 py-12 text-sm text-slate-400">
+              Loading product analytics...
+            </div>
+          ) : productSales.length === 0 ? (
+            <div className="px-6 py-14 text-center">
+              <Package
+                size={34}
+                className="mx-auto text-slate-300"
+              />
 
-                  <th className="px-6 py-3 font-medium">
-                    Sold
-                  </th>
+              <p className="mt-3 font-medium text-slate-700">
+                No product sales yet
+              </p>
 
-                  <th className="px-6 py-3 text-right font-medium">
-                    Revenue
-                  </th>
-                </tr>
-              </thead>
+              <p className="mt-1 text-sm text-slate-400">
+                Successful vending purchases
+                will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-6 py-3 font-medium">
+                      Product
+                    </th>
 
-              <tbody className="divide-y divide-slate-100">
-                {productSales.map(
-                  (product, index) => (
-                    <tr
-                      key={product.product}
-                      className="transition hover:bg-slate-50"
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                            <Package size={17} />
+                    <th className="px-6 py-3 font-medium">
+                      Sold
+                    </th>
+
+                    <th className="px-6 py-3 text-right font-medium">
+                      Revenue
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {productSales.map(
+                    (product, index) => (
+                      <tr
+                        key={product.product}
+                        className="transition hover:bg-slate-50"
+                      >
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                              <Package
+                                size={17}
+                              />
+                            </div>
+
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800">
+                                {
+                                  product.product
+                                }
+                              </p>
+
+                              <p className="mt-0.5 text-xs text-slate-400">
+                                Rank #
+                                {index + 1}
+                              </p>
+                            </div>
                           </div>
+                        </td>
 
-                          <div>
-                            <p className="text-sm font-semibold text-slate-800">
-                              {product.product}
-                            </p>
+                        <td className="px-6 py-4">
+                          <span className="text-sm font-medium text-slate-700">
+                            {
+                              product.quantity
+                            }{" "}
+                            {product.quantity ===
+                            1
+                              ? "item"
+                              : "items"}
+                          </span>
+                        </td>
 
-                            <p className="mt-0.5 text-xs text-slate-400">
-                              Rank #{index + 1}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <span className="text-sm font-medium text-slate-700">
-                          {product.quantity} items
-                        </span>
-                      </td>
-
-                      <td className="px-6 py-4 text-right text-sm font-semibold text-slate-900">
-                        ₱
-                        {product.revenue.toFixed(
-                          2
-                        )}
-                      </td>
-                    </tr>
-                  )
-                )}
-              </tbody>
-            </table>
-          </div>
+                        <td className="px-6 py-4 text-right text-sm font-semibold text-slate-900">
+                          {formatCurrency(
+                            product.revenue
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Report Summary */}
@@ -521,34 +840,54 @@ export default function Reports() {
             <SummaryRow
               icon={PhilippinePeso}
               title="Sales"
-              value={`₱${report.sales.toFixed(2)}`}
+              value={
+                loading
+                  ? "..."
+                  : formatCurrency(
+                      totalSales
+                    )
+              }
             />
 
             <SummaryRow
               icon={CreditCard}
               title="Transactions"
-              value={report.transactions}
+              value={
+                loading
+                  ? "..."
+                  : transactions.length
+              }
             />
 
             <SummaryRow
               icon={ShoppingBag}
               title="Items Sold"
-              value={report.itemsSold}
+              value={
+                loading
+                  ? "..."
+                  : itemsSold
+              }
             />
 
             <SummaryRow
               icon={Activity}
               title="Success Rate"
-              value={`${successRate.toFixed(1)}%`}
+              value={
+                loading
+                  ? "..."
+                  : `${successRate.toFixed(
+                      1
+                    )}%`
+              }
             />
           </div>
 
           <div className="border-t border-slate-200 px-6 py-4">
             <p className="text-xs leading-5 text-slate-400">
-              Report values are currently simulated.
-              Real-time analytics will be generated
-              from transaction records after database
-              integration.
+              Analytics are generated from
+              vending transaction records stored
+              in Supabase for the selected report
+              period.
             </p>
           </div>
         </div>
@@ -608,6 +947,34 @@ function SummaryRow({
       <span className="text-sm font-bold text-slate-900">
         {value}
       </span>
+    </div>
+  );
+}
+
+function ChartLoading() {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-slate-400">
+      Loading analytics...
+    </div>
+  );
+}
+
+function ChartEmptyState() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center text-center">
+      <Activity
+        size={32}
+        className="text-slate-300"
+      />
+
+      <p className="mt-3 text-sm font-medium text-slate-600">
+        No transaction data
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        No vending transactions were recorded
+        during this period.
+      </p>
     </div>
   );
 }
