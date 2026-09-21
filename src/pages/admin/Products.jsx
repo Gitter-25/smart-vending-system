@@ -1,4 +1,5 @@
 import {
+  Loader2,
   MoreHorizontal,
   Package,
   Pencil,
@@ -6,64 +7,66 @@ import {
   Search,
   SlidersHorizontal,
   Trash2,
-  X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 
-const sampleProducts = [
-  {
-    id: 1,
-    name: "Bottled Water",
-    category: "Beverages",
-    price: 20,
-    status: "Active",
-  },
-  {
-    id: 2,
-    name: "Iced Tea",
-    category: "Beverages",
-    price: 25,
-    status: "Active",
-  },
-  {
-    id: 3,
-    name: "Chocolate Bar",
-    category: "Snacks",
-    price: 35,
-    status: "Active",
-  },
-  {
-    id: 4,
-    name: "Potato Chips",
-    category: "Snacks",
-    price: 30,
-    status: "Active",
-  },
-  {
-    id: 5,
-    name: "Biscuits",
-    category: "Snacks",
-    price: 20,
-    status: "Inactive",
-  },
-  {
-    id: 6,
-    name: "Orange Juice",
-    category: "Beverages",
-    price: 30,
-    status: "Active",
-  },
-];
+
 
 const initialFormData = {
   name: "",
   category: "",
   price: "",
-  status: "Active",
+  status: "active",
 };
 
 export default function Products() {
-  const [products, setProducts] = useState(sampleProducts);
+  const [products, setProducts] = useState([]);
+const [loading, setLoading] = useState(true);
+const [pageError, setPageError] = useState("");
+const [saving, setSaving] = useState(false);
+const [deleting, setDeleting] = useState(false);
+
+useEffect(() => {
+  const loadProducts = async () => {
+    setLoading(true);
+    setPageError("");
+
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "id, name, category, price, status, created_at"
+      )
+      .order("created_at", {
+        ascending: true,
+      });
+
+    if (error) {
+      console.error(
+        "Unable to load products:",
+        error.message
+      );
+
+      setPageError(
+        "Unable to load products. Please try again."
+      );
+      setLoading(false);
+      return;
+    }
+
+    const formattedProducts = (data ?? []).map(
+      (product) => ({
+        ...product,
+        price: Number(product.price),
+      })
+    );
+
+    setProducts(formattedProducts);
+    setLoading(false);
+  };
+
+  loadProducts();
+}, []);
 
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
@@ -111,11 +114,11 @@ export default function Products() {
     setEditingProduct(product);
 
     setFormData({
-      name: product.name,
-      category: product.category,
-      price: String(product.price),
-      status: product.status,
-    });
+  name: product.name,
+  category: product.category,
+  price: String(product.price),
+  status: product.status,
+});
 
     setFormError("");
     setOpenMenuId(null);
@@ -129,54 +132,118 @@ export default function Products() {
     setFormError("");
   };
 
-  const handleSubmitProduct = (event) => {
-    event.preventDefault();
-    setFormError("");
+  const handleSubmitProduct = async (event) => {
+  event.preventDefault();
+  setFormError("");
 
-    const name = formData.name.trim();
-    const price = Number(formData.price);
+  const name = formData.name.trim();
+  const price = Number(formData.price);
 
-    if (!name || !formData.category || !formData.price) {
-      setFormError("Please complete all required fields.");
-      return;
-    }
+  if (
+    !name ||
+    !formData.category ||
+    !formData.price
+  ) {
+    setFormError(
+      "Please complete all required fields."
+    );
+    return;
+  }
 
-    if (Number.isNaN(price) || price <= 0) {
-      setFormError("Please enter a valid product price.");
-      return;
-    }
+  if (
+    Number.isNaN(price) ||
+    price <= 0
+  ) {
+    setFormError(
+      "Please enter a valid product price."
+    );
+    return;
+  }
+
+  const normalizedStatus =
+    String(formData.status || "").toLowerCase();
+
+  const productData = {
+    name,
+    category: formData.category,
+    price,
+    status: normalizedStatus,
+  };
+
+  try {
+    setSaving(true);
 
     if (editingProduct) {
+      const { data, error } = await supabase
+        .from("products")
+        .update(productData)
+        .eq("id", editingProduct.id)
+        .select(
+          "id, name, category, price, status, created_at"
+        )
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const updatedProduct = {
+        ...data,
+        price: Number(data.price),
+      };
+
       setProducts((current) =>
         current.map((product) =>
           product.id === editingProduct.id
-            ? {
-                ...product,
-                name,
-                category: formData.category,
-                price,
-                status: formData.status,
-              }
+            ? updatedProduct
             : product
         )
       );
     } else {
+      const { data, error } = await supabase
+        .from("products")
+        .insert({
+          name,
+          category: formData.category,
+          price,
+          status: normalizedStatus,
+        })
+        .select(
+          "id, name, category, price, status, created_at"
+        )
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
       const newProduct = {
-        id:
-          products.length > 0
-            ? Math.max(...products.map((product) => product.id)) + 1
-            : 1,
-        name,
-        category: formData.category,
-        price,
-        status: formData.status,
+        ...data,
+        price: Number(data.price),
       };
 
-      setProducts((current) => [...current, newProduct]);
+      setProducts((current) => [
+        ...current,
+        newProduct,
+      ]);
     }
 
     closeProductModal();
-  };
+  } catch (error) {
+    console.error(
+      "Unable to save product:",
+      error
+    );
+
+    setFormError(
+      editingProduct
+        ? "Unable to update product. Please try again."
+        : "Unable to add product. Please try again."
+    );
+  } finally {
+    setSaving(false);
+  }
+};
 
   const openDeleteConfirmation = (product) => {
     setProductToDelete(product);
@@ -187,23 +254,76 @@ export default function Products() {
     setProductToDelete(null);
   };
 
-  const handleDeleteProduct = () => {
-    if (!productToDelete) {
-      return;
+  const handleDeleteProduct = async () => {
+  if (!productToDelete) {
+    return;
+  }
+
+  try {
+    setDeleting(true);
+
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", productToDelete.id);
+
+    if (error) {
+      throw error;
     }
 
     setProducts((current) =>
       current.filter(
-        (product) => product.id !== productToDelete.id
+        (product) =>
+          product.id !== productToDelete.id
       )
     );
 
     setProductToDelete(null);
-  };
+  } catch (error) {
+    console.error(
+      "Unable to delete product:",
+      error
+    );
+
+    setPageError(
+      "Unable to delete the product. It may currently be assigned to a vending slot."
+    );
+
+    setProductToDelete(null);
+  } finally {
+    setDeleting(false);
+  }
+};
+if (loading) {
+  return (
+    <div className="flex min-h-[400px] items-center justify-center">
+      <div className="text-center">
+        <Loader2
+          size={32}
+          className="mx-auto animate-spin text-blue-600"
+        />
+
+        <p className="mt-3 text-sm text-slate-500">
+          Loading products...
+        </p>
+      </div>
+    </div>
+  );
+}
 
   return (
+    
+    
     <div>
       {/* Page Heading */}
+      {pageError && (
+  <div
+    role="alert"
+    className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+  >
+    {pageError}
+  </div>
+)}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
@@ -236,7 +356,9 @@ export default function Products() {
           title="Active Products"
           value={
             products.filter(
-              (product) => product.status === "Active"
+              (product) =>
+                String(product.status ?? "")
+                  .toLowerCase() === "active"
             ).length
           }
         />
@@ -318,49 +440,54 @@ export default function Products() {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredProducts.map((product) => (
-                <tr
-                  key={product.id}
-                  className="transition hover:bg-slate-50"
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                        <Package size={19} />
+              {filteredProducts.map((product) => {
+                const productStatus =
+                  String(product.status ?? "").toLowerCase();
+
+                return (
+                  <tr
+                    key={product.id}
+                    className="transition hover:bg-slate-50"
+                  >
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                          <Package size={19} />
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">
+                            {product.name}
+                          </p>
+
+                          <p className="text-xs text-slate-400">
+                          Product #{product.id.slice(0, 8).toUpperCase()}
+                          </p>
+                        </div>
                       </div>
+                    </td>
 
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">
-                          {product.name}
-                        </p>
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {product.category}
+                    </td>
 
-                        <p className="text-xs text-slate-400">
-                          Product #
-                          {String(product.id).padStart(3, "0")}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
+                    <td className="px-6 py-4 text-sm font-semibold text-slate-800">
+                      ₱{product.price.toFixed(2)}
+                    </td>
 
-                  <td className="px-6 py-4 text-sm text-slate-600">
-                    {product.category}
-                  </td>
-
-                  <td className="px-6 py-4 text-sm font-semibold text-slate-800">
-                    ₱{product.price.toFixed(2)}
-                  </td>
-
-                  <td className="px-6 py-4">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                        product.status === "Active"
-                          ? "bg-green-50 text-green-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {product.status}
-                    </span>
-                  </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                          productStatus === "active"
+                            ? "bg-green-50 text-green-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {productStatus === "active"
+                          ? "Active"
+                          : "Inactive"}
+                      </span>
+                    </td>
 
                   {/* Action Menu */}
                   <td className="relative px-6 py-4 text-right">
@@ -406,7 +533,8 @@ export default function Products() {
                     )}
                   </td>
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
 
@@ -458,13 +586,13 @@ export default function Products() {
               </div>
 
               <button
-                type="button"
-                onClick={closeProductModal}
-                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
+  type="button"
+  onClick={closeProductModal}
+  disabled={saving}
+  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+>
+  Cancel
+</button>
             </div>
 
             <form onSubmit={handleSubmitProduct}>
@@ -563,12 +691,12 @@ export default function Products() {
                     onChange={handleInputChange}
                     className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                   >
-                    <option value="Active">
-                      Active
+                    <option value="active">
+                    Active
                     </option>
 
-                    <option value="Inactive">
-                      Inactive
+                    <option value="inactive">
+                    Inactive
                     </option>
                   </select>
                 </div>
@@ -594,13 +722,23 @@ export default function Products() {
                 </button>
 
                 <button
-                  type="submit"
-                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-                >
-                  {editingProduct
-                    ? "Save Changes"
-                    : "Add Product"}
-                </button>
+  type="submit"
+  disabled={saving}
+  className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
+>
+  {saving && (
+    <Loader2
+      size={17}
+      className="animate-spin"
+    />
+  )}
+
+  {saving
+    ? "Saving..."
+    : editingProduct
+      ? "Save Changes"
+      : "Add Product"}
+</button>
               </div>
             </form>
           </div>
@@ -639,12 +777,22 @@ export default function Products() {
               </button>
 
               <button
-                type="button"
-                onClick={handleDeleteProduct}
-                className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
-              >
-                Delete Product
-              </button>
+  type="button"
+  onClick={handleDeleteProduct}
+  disabled={deleting}
+  className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-400"
+>
+  {deleting && (
+    <Loader2
+      size={17}
+      className="animate-spin"
+    />
+  )}
+
+  {deleting
+    ? "Deleting..."
+    : "Delete Product"}
+</button>
             </div>
           </div>
         </div>
