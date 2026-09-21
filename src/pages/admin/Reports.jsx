@@ -8,7 +8,6 @@ import {
   TrendingUp,
 } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -261,69 +260,72 @@ export default function Reports() {
   const [pageError, setPageError] =
     useState("");
 
-  const loadReportData = useCallback(
-    async () => {
-      setLoading(true);
-      setPageError("");
+  useEffect(() => {
+  let ignore = false;
 
-      try {
-        const startDate =
-          getStartDate(dateRange);
+  const loadReportData = async () => {
+    try {
+      const startDate = getStartDate(dateRange);
 
-        let query = supabase
-          .from("vending_transactions")
-          .select(
-            `
-              id,
-              transaction_code,
-              product_name,
-              amount,
-              status,
-              created_at,
-              completed_at,
-              product_id
-            `
-          )
-          .order("created_at", {
-            ascending: true,
-          });
+      let query = supabase
+        .from("vending_transactions")
+        .select(
+          `
+            id,
+            transaction_code,
+            product_name,
+            amount,
+            status,
+            created_at,
+            completed_at,
+            product_id
+          `
+        )
+        .order("created_at", {
+          ascending: true,
+        });
 
-        if (startDate) {
-          query = query.gte(
-            "created_at",
-            startDate.toISOString()
-          );
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-          throw error;
-        }
-
-        setTransactions(data || []);
-      } catch (error) {
-        console.error(
-          "Unable to load report data:",
-          error
+      if (startDate) {
+        query = query.gte(
+          "created_at",
+          startDate.toISOString()
         );
+      }
 
+      const { data, error } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      if (!ignore) {
+        setTransactions(data || []);
+        setPageError("");
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error(
+        "Unable to load report data:",
+        error
+      );
+
+      if (!ignore) {
+        setTransactions([]);
         setPageError(
           error.message ||
             "Unable to load report data."
         );
-
-        setTransactions([]);
-      } finally {
         setLoading(false);
       }
-    },
-    [dateRange]
-  );
+    }
+  };
 
-  useEffect(() => {
-    loadReportData();
-  }, [loadReportData]);
+  loadReportData();
+
+  return () => {
+    ignore = true;
+  };
+}, [dateRange]);
 
   const successfulTransactions =
     useMemo(
@@ -420,9 +422,10 @@ export default function Reports() {
           <select
             id="report-range"
             value={dateRange}
-            onChange={(event) =>
-              setDateRange(event.target.value)
-            }
+            onChange={(event) => {
+  setLoading(true);
+  setDateRange(event.target.value);
+}}
             disabled={loading}
             className="min-w-44 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
