@@ -1,6 +1,7 @@
 import {
   Ban,
   CheckCircle2,
+  CircleDollarSign,
   CreditCard,
   Loader2,
   MoreHorizontal,
@@ -44,12 +45,28 @@ export default function Students() {
   const [saving, setSaving] = useState(false);
 
   const [openMenuId, setOpenMenuId] = useState(null);
+
   const [updatingStatusId, setUpdatingStatusId] =
     useState(null);
 
-  // -------------------------
-  // Load Students + Cards
-  // -------------------------
+  // Top-up state
+  const [topUpStudent, setTopUpStudent] =
+    useState(null);
+
+  const [topUpAmount, setTopUpAmount] =
+    useState("");
+
+  const [topUpDescription, setTopUpDescription] =
+    useState("Admin top-up");
+
+  const [topUpError, setTopUpError] = useState("");
+
+  const [topUpSaving, setTopUpSaving] =
+    useState(false);
+
+  // --------------------------------
+  // Load Students + Student Cards
+  // --------------------------------
 
   useEffect(() => {
     const loadStudents = async () => {
@@ -92,25 +109,32 @@ export default function Students() {
 
       const formattedStudents = (data ?? []).map(
         (student) => {
-          const cards = student.student_cards ?? [];
+          const cards =
+            student.student_cards ?? [];
 
           const activeCard =
             cards.find(
-              (card) => card.status === "active"
+              (card) =>
+                card.status === "active"
             ) ?? cards[0];
 
           return {
             id: student.id,
-            studentNumber: student.student_number,
+            studentNumber:
+              student.student_number,
             name: student.full_name,
             balance: Number(student.balance),
             studentStatus: student.status,
 
             cardId: activeCard?.id ?? null,
+
             cardUid:
-              activeCard?.card_uid ?? "No card assigned",
+              activeCard?.card_uid ??
+              "No card assigned",
+
             cardStatus:
-              activeCard?.status ?? "unassigned",
+              activeCard?.status ??
+              "unassigned",
           };
         }
       );
@@ -122,12 +146,13 @@ export default function Students() {
     loadStudents();
   }, []);
 
-  // -------------------------
-  // Filtering
-  // -------------------------
+  // --------------------------------
+  // Search / Filtering
+  // --------------------------------
 
   const filteredStudents = useMemo(() => {
-    const searchValue = search.trim().toLowerCase();
+    const searchValue =
+      search.trim().toLowerCase();
 
     return students.filter((student) => {
       const matchesSearch =
@@ -144,7 +169,8 @@ export default function Students() {
       const displayStatus =
         student.cardStatus === "active"
           ? "Active"
-          : student.cardStatus === "unassigned"
+          : student.cardStatus ===
+              "unassigned"
             ? "Unassigned"
             : "Blocked";
 
@@ -156,12 +182,13 @@ export default function Students() {
     });
   }, [students, search, statusFilter]);
 
-  // -------------------------
+  // --------------------------------
   // Statistics
-  // -------------------------
+  // --------------------------------
 
   const activeCards = students.filter(
-    (student) => student.cardStatus === "active"
+    (student) =>
+      student.cardStatus === "active"
   ).length;
 
   const blockedCards = students.filter(
@@ -177,9 +204,9 @@ export default function Students() {
     0
   );
 
-  // -------------------------
-  // Form Helpers
-  // -------------------------
+  // --------------------------------
+  // Student Form Helpers
+  // --------------------------------
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -202,12 +229,16 @@ export default function Students() {
     setEditingStudent(student);
 
     setFormData({
-      studentNumber: student.studentNumber,
+      studentNumber:
+        student.studentNumber,
+
       name: student.name,
+
       cardUid:
         student.cardId !== null
           ? student.cardUid
           : "",
+
       status:
         student.cardStatus === "active"
           ? "active"
@@ -230,11 +261,13 @@ export default function Students() {
     setFormError("");
   };
 
-  // -------------------------
+  // --------------------------------
   // Add / Edit Student
-  // -------------------------
+  // --------------------------------
 
-  const handleSubmitStudent = async (event) => {
+  const handleSubmitStudent = async (
+    event
+  ) => {
     event.preventDefault();
 
     setFormError("");
@@ -242,38 +275,52 @@ export default function Students() {
     const studentNumber =
       formData.studentNumber.trim();
 
-    const name = formData.name.trim();
+    const name =
+      formData.name.trim();
 
-    const cardUid = formData.cardUid
-      .trim()
-      .toUpperCase();
+    const cardUid =
+      formData.cardUid
+        .trim()
+        .toUpperCase();
 
-    if (!studentNumber || !name || !cardUid) {
+    if (
+      !studentNumber ||
+      !name ||
+      !cardUid
+    ) {
       setFormError(
         "Student number, student name, and card UID are required."
       );
+
       return;
     }
 
     setSaving(true);
 
     try {
-      if (editingStudent) {
-        // -------------------------
-        // Update Student
-        // -------------------------
+      // ============================
+      // EDIT STUDENT
+      // ============================
 
+      if (editingStudent) {
         const { error: studentError } =
           await supabase
             .from("students")
             .update({
-              student_number: studentNumber,
+              student_number:
+                studentNumber,
               full_name: name,
             })
-            .eq("id", editingStudent.id);
+            .eq(
+              "id",
+              editingStudent.id
+            );
 
         if (studentError) {
-          if (studentError.code === "23505") {
+          if (
+            studentError.code ===
+            "23505"
+          ) {
             setFormError(
               "This student number is already registered."
             );
@@ -292,14 +339,15 @@ export default function Students() {
           return;
         }
 
-        // Existing card
+        // Update existing card
         if (editingStudent.cardId) {
           const { error: cardError } =
             await supabase
               .from("student_cards")
               .update({
                 card_uid: cardUid,
-                status: formData.status,
+                status:
+                  formData.status,
               })
               .eq(
                 "id",
@@ -307,7 +355,10 @@ export default function Students() {
               );
 
           if (cardError) {
-            if (cardError.code === "23505") {
+            if (
+              cardError.code ===
+              "23505"
+            ) {
               setFormError(
                 "This card UID is already assigned to another student."
               );
@@ -326,22 +377,31 @@ export default function Students() {
             return;
           }
         } else {
-          // Student exists but has no card
-          const { data: newCard, error: cardError } =
-            await supabase
-              .from("student_cards")
-              .insert({
-                student_id: editingStudent.id,
-                card_uid: cardUid,
-                status: formData.status,
-              })
-              .select(
-                "id, card_uid, status"
-              )
-              .single();
+          // Student exists without a card
+          const {
+            data: newCard,
+            error: cardError,
+          } = await supabase
+            .from("student_cards")
+            .insert({
+              student_id:
+                editingStudent.id,
+
+              card_uid: cardUid,
+
+              status:
+                formData.status,
+            })
+            .select(
+              "id, card_uid, status"
+            )
+            .single();
 
           if (cardError) {
-            if (cardError.code === "23505") {
+            if (
+              cardError.code ===
+              "23505"
+            ) {
               setFormError(
                 "This card UID is already assigned to another student."
               );
@@ -362,13 +422,19 @@ export default function Students() {
 
           setStudents((current) =>
             current.map((student) =>
-              student.id === editingStudent.id
+              student.id ===
+              editingStudent.id
                 ? {
                     ...student,
                     studentNumber,
                     name,
-                    cardId: newCard.id,
-                    cardUid: newCard.card_uid,
+
+                    cardId:
+                      newCard.id,
+
+                    cardUid:
+                      newCard.card_uid,
+
                     cardStatus:
                       newCard.status,
                   }
@@ -379,19 +445,24 @@ export default function Students() {
           setSaving(false);
           setShowStudentModal(false);
           setEditingStudent(null);
-          setFormData(initialFormData);
+          setFormData(
+            initialFormData
+          );
           setFormError("");
+
           return;
         }
 
         setStudents((current) =>
           current.map((student) =>
-            student.id === editingStudent.id
+            student.id ===
+            editingStudent.id
               ? {
                   ...student,
                   studentNumber,
                   name,
                   cardUid,
+
                   cardStatus:
                     formData.status,
                 }
@@ -399,9 +470,9 @@ export default function Students() {
           )
         );
       } else {
-        // -------------------------
-        // Create Student
-        // -------------------------
+        // ============================
+        // CREATE STUDENT
+        // ============================
 
         const {
           data: newStudent,
@@ -409,9 +480,13 @@ export default function Students() {
         } = await supabase
           .from("students")
           .insert({
-            student_number: studentNumber,
+            student_number:
+              studentNumber,
+
             full_name: name,
+
             balance: 0,
+
             status: "active",
           })
           .select(
@@ -420,7 +495,10 @@ export default function Students() {
           .single();
 
         if (studentError) {
-          if (studentError.code === "23505") {
+          if (
+            studentError.code ===
+            "23505"
+          ) {
             setFormError(
               "This student number is already registered."
             );
@@ -446,20 +524,31 @@ export default function Students() {
         } = await supabase
           .from("student_cards")
           .insert({
-            student_id: newStudent.id,
+            student_id:
+              newStudent.id,
+
             card_uid: cardUid,
-            status: formData.status,
+
+            status:
+              formData.status,
           })
-          .select("id, card_uid, status")
+          .select(
+            "id, card_uid, status"
+          )
           .single();
 
         if (cardError) {
-          // Roll back student if card creation fails.
-          const { error: rollbackError } =
-            await supabase
-              .from("students")
-              .delete()
-              .eq("id", newStudent.id);
+          // Roll back the student
+          // if card creation fails.
+          const {
+            error: rollbackError,
+          } = await supabase
+            .from("students")
+            .delete()
+            .eq(
+              "id",
+              newStudent.id
+            );
 
           if (rollbackError) {
             console.error(
@@ -468,7 +557,10 @@ export default function Students() {
             );
           }
 
-          if (cardError.code === "23505") {
+          if (
+            cardError.code ===
+            "23505"
+          ) {
             setFormError(
               "This card UID is already assigned to another student."
             );
@@ -489,14 +581,28 @@ export default function Students() {
 
         const formattedStudent = {
           id: newStudent.id,
+
           studentNumber:
             newStudent.student_number,
-          name: newStudent.full_name,
-          balance: Number(newStudent.balance),
-          studentStatus: newStudent.status,
-          cardId: newCard.id,
-          cardUid: newCard.card_uid,
-          cardStatus: newCard.status,
+
+          name:
+            newStudent.full_name,
+
+          balance: Number(
+            newStudent.balance
+          ),
+
+          studentStatus:
+            newStudent.status,
+
+          cardId:
+            newCard.id,
+
+          cardUid:
+            newCard.card_uid,
+
+          cardStatus:
+            newCard.status,
         };
 
         setStudents((current) => [
@@ -524,11 +630,13 @@ export default function Students() {
     }
   };
 
-  // -------------------------
+  // --------------------------------
   // Block / Activate Card
-  // -------------------------
+  // --------------------------------
 
-  const toggleCardStatus = async (student) => {
+  const toggleCardStatus = async (
+    student
+  ) => {
     if (!student.cardId) {
       setOpenMenuId(null);
       return;
@@ -539,7 +647,10 @@ export default function Students() {
         ? "blocked"
         : "active";
 
-    setUpdatingStatusId(student.id);
+    setUpdatingStatusId(
+      student.id
+    );
+
     setOpenMenuId(null);
 
     const { error } = await supabase
@@ -547,7 +658,10 @@ export default function Students() {
       .update({
         status: newStatus,
       })
-      .eq("id", student.cardId);
+      .eq(
+        "id",
+        student.cardId
+      );
 
     if (error) {
       console.error(
@@ -564,13 +678,17 @@ export default function Students() {
     }
 
     setStudents((current) =>
-      current.map((currentStudent) =>
-        currentStudent.id === student.id
-          ? {
-              ...currentStudent,
-              cardStatus: newStatus,
-            }
-          : currentStudent
+      current.map(
+        (currentStudent) =>
+          currentStudent.id ===
+          student.id
+            ? {
+                ...currentStudent,
+
+                cardStatus:
+                  newStatus,
+              }
+            : currentStudent
       )
     );
 
@@ -578,9 +696,161 @@ export default function Students() {
     setPageError("");
   };
 
-  // -------------------------
+  // --------------------------------
+  // Top Up Balance
+  // --------------------------------
+
+  const openTopUpModal = (
+    student
+  ) => {
+    setTopUpStudent(student);
+    setTopUpAmount("");
+
+    setTopUpDescription(
+      "Admin top-up"
+    );
+
+    setTopUpError("");
+    setOpenMenuId(null);
+  };
+
+  const closeTopUpModal = () => {
+    if (topUpSaving) {
+      return;
+    }
+
+    setTopUpStudent(null);
+    setTopUpAmount("");
+
+    setTopUpDescription(
+      "Admin top-up"
+    );
+
+    setTopUpError("");
+  };
+
+  const handleTopUp = async (
+    event
+  ) => {
+    event.preventDefault();
+
+    if (!topUpStudent) {
+      return;
+    }
+
+    setTopUpError("");
+
+    const amount =
+      Number(topUpAmount);
+
+    const description =
+      topUpDescription.trim() ||
+      "Admin top-up";
+
+    if (
+      !topUpAmount ||
+      Number.isNaN(amount) ||
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      setTopUpError(
+        "Enter a valid top-up amount greater than ₱0.00."
+      );
+
+      return;
+    }
+
+    // Maximum two decimal places.
+    const amountInCentavos =
+      Math.round(amount * 100);
+
+    if (
+      Math.abs(
+        amount * 100 -
+          amountInCentavos
+      ) > 0.000001
+    ) {
+      setTopUpError(
+        "The amount can have a maximum of two decimal places."
+      );
+
+      return;
+    }
+
+    setTopUpSaving(true);
+
+    const { data, error } =
+      await supabase.rpc(
+        "top_up_student_balance",
+        {
+          p_student_id:
+            topUpStudent.id,
+
+          p_amount: amount,
+
+          p_description:
+            description,
+        }
+      );
+
+    if (error) {
+      console.error(
+        "Unable to top up balance:",
+        error
+      );
+
+      setTopUpError(
+        "Unable to add balance. Please try again."
+      );
+
+      setTopUpSaving(false);
+      return;
+    }
+
+    const result = data?.[0];
+
+    if (!result) {
+      setTopUpError(
+        "The balance was not updated. Please try again."
+      );
+
+      setTopUpSaving(false);
+      return;
+    }
+
+    const newBalance =
+      Number(
+        result.new_balance
+      );
+
+    setStudents((current) =>
+      current.map((student) =>
+        student.id ===
+        topUpStudent.id
+          ? {
+              ...student,
+              balance:
+                newBalance,
+            }
+          : student
+      )
+    );
+
+    setTopUpSaving(false);
+    setTopUpStudent(null);
+    setTopUpAmount("");
+
+    setTopUpDescription(
+      "Admin top-up"
+    );
+
+    setTopUpError("");
+    setPageError("");
+  };
+
+  // --------------------------------
   // Loading
-  // -------------------------
+  // --------------------------------
 
   if (loading) {
     return (
@@ -609,8 +879,8 @@ export default function Students() {
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Manage registered students and their vending
-            machine ID cards.
+            Manage registered students and
+            their vending machine ID cards.
           </p>
         </div>
 
@@ -659,7 +929,9 @@ export default function Students() {
 
         <StudentStatCard
           title="Total Balance"
-          value={`₱${totalBalance.toFixed(2)}`}
+          value={`₱${totalBalance.toFixed(
+            2
+          )}`}
           description="Combined student balance"
           icon={WalletCards}
         />
@@ -680,7 +952,9 @@ export default function Students() {
               type="text"
               value={search}
               onChange={(event) =>
-                setSearch(event.target.value)
+                setSearch(
+                  event.target.value
+                )
               }
               placeholder="Search student, number, or card UID..."
               className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
@@ -697,7 +971,9 @@ export default function Students() {
             <select
               value={statusFilter}
               onChange={(event) =>
-                setStatusFilter(event.target.value)
+                setStatusFilter(
+                  event.target.value
+                )
               }
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
             >
@@ -752,167 +1028,209 @@ export default function Students() {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredStudents.map((student) => (
-                <tr
-                  key={student.id}
-                  className="transition hover:bg-slate-50"
-                >
-                  {/* Student */}
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-                        <UserRound size={18} />
-                      </div>
-
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">
-                          {student.name}
-                        </p>
-
-                        <p className="text-xs text-slate-400">
-                          ID{" "}
-                          {student.id
-                            .slice(0, 8)
-                            .toUpperCase()}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Student Number */}
-                  <td className="px-6 py-4 text-sm font-medium text-slate-700">
-                    {student.studentNumber}
-                  </td>
-
-                  {/* Card UID */}
-                  <td className="px-6 py-4">
-                    {student.cardId ? (
-                      <div className="inline-flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
-                        <CreditCard
-                          size={15}
-                          className="text-slate-400"
-                        />
-
-                        <span className="font-mono text-xs text-slate-600">
-                          {student.cardUid}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-slate-400">
-                        No card assigned
-                      </span>
-                    )}
-                  </td>
-
-                  {/* Balance */}
-                  <td className="px-6 py-4 text-sm font-semibold text-slate-800">
-                    ₱
-                    {Number(
-                      student.balance
-                    ).toFixed(2)}
-                  </td>
-
-                  {/* Card Status */}
-                  <td className="px-6 py-4">
-                    <StudentStatusBadge
-                      status={student.cardStatus}
-                    />
-                  </td>
-
-                  {/* Actions */}
-                  <td className="relative px-6 py-4 text-right">
-                    {updatingStatusId ===
-                    student.id ? (
-                      <div className="inline-flex p-2">
-                        <Loader2
-                          size={19}
-                          className="animate-spin text-blue-600"
-                        />
-                      </div>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setOpenMenuId(
-                              (current) =>
-                                current ===
-                                student.id
-                                  ? null
-                                  : student.id
-                            )
-                          }
-                          className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                          aria-label={`Actions for ${student.name}`}
-                        >
-                          <MoreHorizontal
-                            size={19}
+              {filteredStudents.map(
+                (student) => (
+                  <tr
+                    key={student.id}
+                    className="transition hover:bg-slate-50"
+                  >
+                    {/* Student */}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                          <UserRound
+                            size={18}
                           />
-                        </button>
+                        </div>
 
-                        {openMenuId ===
-                          student.id && (
-                          <div className="absolute right-6 top-12 z-30 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-lg">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openEditModal(
-                                  student
-                                )
-                              }
-                              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
-                            >
-                              <Pencil
-                                size={16}
-                              />
-                              Edit
-                            </button>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">
+                            {student.name}
+                          </p>
 
-                            {student.cardId && (
+                          <p className="text-xs text-slate-400">
+                            ID{" "}
+                            {student.id
+                              .slice(0, 8)
+                              .toUpperCase()}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Student Number */}
+                    <td className="px-6 py-4 text-sm font-medium text-slate-700">
+                      {
+                        student.studentNumber
+                      }
+                    </td>
+
+                    {/* Card UID */}
+                    <td className="px-6 py-4">
+                      {student.cardId ? (
+                        <div className="inline-flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                          <CreditCard
+                            size={15}
+                            className="text-slate-400"
+                          />
+
+                          <span className="font-mono text-xs text-slate-600">
+                            {
+                              student.cardUid
+                            }
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-slate-400">
+                          No card assigned
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Balance */}
+                    <td className="px-6 py-4 text-sm font-semibold text-slate-800">
+                      ₱
+                      {Number(
+                        student.balance
+                      ).toFixed(2)}
+                    </td>
+
+                    {/* Card Status */}
+                    <td className="px-6 py-4">
+                      <StudentStatusBadge
+                        status={
+                          student.cardStatus
+                        }
+                      />
+                    </td>
+
+                    {/* Actions */}
+                    <td className="relative px-6 py-4 text-right">
+                      {updatingStatusId ===
+                      student.id ? (
+                        <div className="inline-flex p-2">
+                          <Loader2
+                            size={19}
+                            className="animate-spin text-blue-600"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenMenuId(
+                                (
+                                  current
+                                ) =>
+                                  current ===
+                                  student.id
+                                    ? null
+                                    : student.id
+                              )
+                            }
+                            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                            aria-label={`Actions for ${student.name}`}
+                          >
+                            <MoreHorizontal
+                              size={19}
+                            />
+                          </button>
+
+                          {openMenuId ===
+                            student.id && (
+                            <div className="absolute right-6 top-12 z-30 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-lg">
+                              {/* Edit */}
                               <button
                                 type="button"
                                 onClick={() =>
-                                  toggleCardStatus(
+                                  openEditModal(
                                     student
                                   )
                                 }
-                                className={`flex w-full items-center gap-2 px-4 py-2.5 text-sm transition ${
-                                  student.cardStatus ===
-                                  "active"
-                                    ? "text-red-600 hover:bg-red-50"
-                                    : "text-green-700 hover:bg-green-50"
-                                }`}
+                                className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
                               >
-                                {student.cardStatus ===
-                                "active" ? (
-                                  <>
-                                    <Ban
-                                      size={16}
-                                    />
-                                    Block Card
-                                  </>
-                                ) : (
-                                  <>
-                                    <CheckCircle2
-                                      size={16}
-                                    />
-                                    Activate Card
-                                  </>
-                                )}
+                                <Pencil
+                                  size={
+                                    16
+                                  }
+                                />
+                                Edit
                               </button>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
+
+                              {/* Top Up */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openTopUpModal(
+                                    student
+                                  )
+                                }
+                                className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-blue-700 transition hover:bg-blue-50"
+                              >
+                                <CircleDollarSign
+                                  size={
+                                    16
+                                  }
+                                />
+                                Top Up
+                                Balance
+                              </button>
+
+                              {/* Block / Activate */}
+                              {student.cardId && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleCardStatus(
+                                      student
+                                    )
+                                  }
+                                  className={`flex w-full items-center gap-2 px-4 py-2.5 text-sm transition ${
+                                    student.cardStatus ===
+                                    "active"
+                                      ? "text-red-600 hover:bg-red-50"
+                                      : "text-green-700 hover:bg-green-50"
+                                  }`}
+                                >
+                                  {student.cardStatus ===
+                                  "active" ? (
+                                    <>
+                                      <Ban
+                                        size={
+                                          16
+                                        }
+                                      />
+                                      Block
+                                      Card
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle2
+                                        size={
+                                          16
+                                        }
+                                      />
+                                      Activate
+                                      Card
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
 
           {/* Empty Results */}
-          {filteredStudents.length === 0 && (
+          {filteredStudents.length ===
+            0 && (
             <div className="px-6 py-14 text-center">
               <Users
                 size={34}
@@ -924,8 +1242,8 @@ export default function Students() {
               </p>
 
               <p className="mt-1 text-sm text-slate-400">
-                Try changing your search or status
-                filter.
+                Try changing your search or
+                status filter.
               </p>
             </div>
           )}
@@ -934,17 +1252,21 @@ export default function Students() {
         {/* Footer */}
         <div className="border-t border-slate-200 px-6 py-4">
           <p className="text-sm text-slate-500">
-            Showing {filteredStudents.length} of{" "}
+            Showing{" "}
+            {filteredStudents.length} of{" "}
             {students.length} students
           </p>
         </div>
       </div>
 
+      {/* ================================= */}
       {/* Add / Edit Student Modal */}
+      {/* ================================= */}
+
       {showStudentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl">
-            {/* Modal Header */}
+            {/* Header */}
             <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
@@ -962,7 +1284,9 @@ export default function Students() {
 
               <button
                 type="button"
-                onClick={closeStudentModal}
+                onClick={
+                  closeStudentModal
+                }
                 disabled={saving}
                 className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
                 aria-label="Close"
@@ -971,7 +1295,11 @@ export default function Students() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmitStudent}>
+            <form
+              onSubmit={
+                handleSubmitStudent
+              }
+            >
               <div className="space-y-5 p-6">
                 {/* Student Number */}
                 <div>
@@ -989,7 +1317,9 @@ export default function Students() {
                     value={
                       formData.studentNumber
                     }
-                    onChange={handleInputChange}
+                    onChange={
+                      handleInputChange
+                    }
                     disabled={saving}
                     placeholder="e.g. 2026-0001"
                     className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
@@ -1009,8 +1339,12 @@ export default function Students() {
                     id="student-name"
                     name="name"
                     type="text"
-                    value={formData.name}
-                    onChange={handleInputChange}
+                    value={
+                      formData.name
+                    }
+                    onChange={
+                      handleInputChange
+                    }
                     disabled={saving}
                     placeholder="e.g. Juan Dela Cruz"
                     className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
@@ -1030,18 +1364,25 @@ export default function Students() {
                     id="card-uid"
                     name="cardUid"
                     type="text"
-                    value={formData.cardUid}
-                    onChange={handleInputChange}
+                    value={
+                      formData.cardUid
+                    }
+                    onChange={
+                      handleInputChange
+                    }
                     disabled={saving}
                     placeholder="e.g. 04:A3:7B:91"
                     className="w-full rounded-xl border border-slate-300 px-4 py-2.5 font-mono text-sm uppercase outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                   />
 
                   <p className="mt-2 text-xs leading-5 text-slate-400">
-                    This is the electronic UID read
-                    from the physical student card.
-                    It is separate from the printed
-                    student number.
+                    This is the
+                    electronic UID read
+                    from the physical
+                    student card. It is
+                    separate from the
+                    printed student
+                    number.
                   </p>
                 </div>
 
@@ -1057,8 +1398,12 @@ export default function Students() {
                   <select
                     id="card-status"
                     name="status"
-                    value={formData.status}
-                    onChange={handleInputChange}
+                    value={
+                      formData.status
+                    }
+                    onChange={
+                      handleInputChange
+                    }
                     disabled={saving}
                     className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
                   >
@@ -1083,10 +1428,11 @@ export default function Students() {
                   </p>
 
                   <p className="mt-1 text-xs leading-5 text-blue-600">
-                    Balance is not edited here.
-                    Balance changes will be recorded
-                    through top-up, purchase, refund,
-                    or adjustment transactions.
+                    Balance is not edited
+                    here. Use the Top Up
+                    Balance action so
+                    every balance change
+                    is recorded.
                   </p>
                 </div>
 
@@ -1101,11 +1447,13 @@ export default function Students() {
                 )}
               </div>
 
-              {/* Modal Buttons */}
+              {/* Buttons */}
               <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
                 <button
                   type="button"
-                  onClick={closeStudentModal}
+                  onClick={
+                    closeStudentModal
+                  }
                   disabled={saving}
                   className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -1135,9 +1483,246 @@ export default function Students() {
           </div>
         </div>
       )}
+
+      {/* ================================= */}
+      {/* Top Up Balance Modal */}
+      {/* ================================= */}
+
+      {topUpStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Top Up Balance
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Add funds to the
+                  student's vending
+                  account.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={
+                  closeTopUpModal
+                }
+                disabled={topUpSaving}
+                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleTopUp}
+            >
+              <div className="space-y-5 p-6">
+                {/* Student */}
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                      <UserRound
+                        size={18}
+                      />
+                    </div>
+
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {
+                          topUpStudent.name
+                        }
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        {
+                          topUpStudent.studentNumber
+                        }
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-4">
+                    <span className="text-sm text-slate-500">
+                      Current balance
+                    </span>
+
+                    <span className="text-lg font-bold text-slate-900">
+                      ₱
+                      {Number(
+                        topUpStudent.balance
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Amount */}
+                <div>
+                  <label
+                    htmlFor="top-up-amount"
+                    className="mb-2 block text-sm font-medium text-slate-700"
+                  >
+                    Top-up amount
+                  </label>
+
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500">
+                      ₱
+                    </span>
+
+                    <input
+                      id="top-up-amount"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={
+                        topUpAmount
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        setTopUpAmount(
+                          event.target
+                            .value
+                        )
+                      }
+                      disabled={
+                        topUpSaving
+                      }
+                      placeholder="0.00"
+                      className="w-full rounded-xl border border-slate-300 py-2.5 pl-8 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label
+                    htmlFor="top-up-description"
+                    className="mb-2 block text-sm font-medium text-slate-700"
+                  >
+                    Description
+                  </label>
+
+                  <input
+                    id="top-up-description"
+                    type="text"
+                    value={
+                      topUpDescription
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setTopUpDescription(
+                        event.target
+                          .value
+                      )
+                    }
+                    disabled={
+                      topUpSaving
+                    }
+                    maxLength={100}
+                    placeholder="Admin top-up"
+                    className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
+                  />
+                </div>
+
+                {/* Balance Preview */}
+                {topUpAmount &&
+                  Number(
+                    topUpAmount
+                  ) > 0 && (
+                    <div className="rounded-xl border border-green-100 bg-green-50 p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-green-700">
+                          Balance after
+                          top-up
+                        </span>
+
+                        <span className="font-bold text-green-800">
+                          ₱
+                          {(
+                            Number(
+                              topUpStudent.balance
+                            ) +
+                            Number(
+                              topUpAmount
+                            )
+                          ).toFixed(
+                            2
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                {/* Error */}
+                {topUpError && (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                  >
+                    {topUpError}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+                <button
+                  type="button"
+                  onClick={
+                    closeTopUpModal
+                  }
+                  disabled={
+                    topUpSaving
+                  }
+                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={
+                    topUpSaving
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {topUpSaving ? (
+                    <>
+                      <Loader2
+                        size={16}
+                        className="animate-spin"
+                      />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <CircleDollarSign
+                        size={16}
+                      />
+                      Add Balance
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// =================================
+// Statistic Card
+// =================================
 
 function StudentStatCard({
   title,
@@ -1170,7 +1755,13 @@ function StudentStatCard({
   );
 }
 
-function StudentStatusBadge({ status }) {
+// =================================
+// Card Status Badge
+// =================================
+
+function StudentStatusBadge({
+  status,
+}) {
   if (status === "active") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">
