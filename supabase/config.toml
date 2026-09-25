@@ -446,3 +446,47 @@ entrypoint = "./functions/vending-dispense-result/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/vending-dispense-result/*.html" ]
+
+[functions.vending-qr-create]
+enabled = true
+verify_jwt = false
+import_map = "./functions/vending-qr-create/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/vending-qr-create/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/vending-qr-create/*.html" ]
+
+[functions.maya-payment-webhook]
+enabled = true
+verify_jwt = false
+import_map = "./functions/maya-payment-webhook/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/maya-payment-webhook/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/maya-payment-webhook/*.html" ]
+
+[functions.vending-qr-status]
+enabled = true
+verify_jwt = false
+import_map = "./functions/vending-qr-status/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/vending-qr-status/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/vending-qr-status/*.html" ]
+
+[functions.vending-qr-simulate-payment]
+enabled = true
+verify_jwt = false
+import_map = "./functions/vending-qr-simulate-payment/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/vending-qr-simulate-payment/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/vending-qr-simulate-payment/*.html" ]
