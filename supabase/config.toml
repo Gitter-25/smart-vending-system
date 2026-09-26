@@ -501,3 +501,36 @@ entrypoint = "./functions/vending-qr-simulate-refund/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/vending-qr-simulate-refund/*.html" ]
+
+[functions.vending-simulator-card-purchase]
+enabled = true
+verify_jwt = false
+import_map = "./functions/vending-simulator-card-purchase/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/vending-simulator-card-purchase/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/vending-simulator-card-purchase/*.html" ]
+
+[functions.vending-simulator-dispense]
+enabled = true
+verify_jwt = false
+import_map = "./functions/vending-simulator-dispense/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/vending-simulator-dispense/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/vending-simulator-dispense/*.html" ]
+
+[functions.vending-simulator-qr]
+enabled = true
+verify_jwt = false
+import_map = "./functions/vending-simulator-qr/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/vending-simulator-qr/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/vending-simulator-qr/*.html" ]

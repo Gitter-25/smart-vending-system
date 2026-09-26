@@ -16,12 +16,19 @@ import Settings from "./pages/admin/Settings";
 import Students from "./pages/admin/Students";
 import Transactions from "./pages/admin/Transactions";
 import Login from "./pages/auth/Login";
+import VendingSimulator from "./pages/simulator/VendingSimulator";
 
 export default function App() {
   return (
     <Routes>
-      {/* Public route */}
+      {/* Public routes */}
       <Route path="/login" element={<Login />} />
+
+      {/* Development vending machine simulator */}
+      <Route
+        path="/simulator"
+        element={<VendingSimulator />}
+      />
 
       {/* Protected admin routes */}
       <Route element={<ProtectedRoute />}>
