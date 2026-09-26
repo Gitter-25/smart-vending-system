@@ -490,3 +490,14 @@ entrypoint = "./functions/vending-qr-simulate-payment/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/vending-qr-simulate-payment/*.html" ]
+
+[functions.vending-qr-simulate-refund]
+enabled = true
+verify_jwt = false
+import_map = "./functions/vending-qr-simulate-refund/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/vending-qr-simulate-refund/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/vending-qr-simulate-refund/*.html" ]
