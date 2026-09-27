@@ -151,14 +151,30 @@ useEffect(() => {
   }
 
   if (
-    Number.isNaN(price) ||
-    price <= 0
-  ) {
-    setFormError(
-      "Please enter a valid product price."
-    );
-    return;
-  }
+  Number.isNaN(price) ||
+  !Number.isFinite(price) ||
+  price <= 0
+) {
+  setFormError(
+    "Please enter a valid product price greater than ₱0.00."
+  );
+  return;
+}
+
+const priceInCentavos = Math.round(
+  price * 100
+);
+
+if (
+  Math.abs(
+    price * 100 - priceInCentavos
+  ) > 0.000001
+) {
+  setFormError(
+    "Product price can have a maximum of two decimal places."
+  );
+  return;
+}
 
   const normalizedStatus =
     String(formData.status || "").toLowerCase();
@@ -331,8 +347,8 @@ if (loading) {
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Manage products available in your vending machine.
-          </p>
+          Manage products and pricing available for SVM-001.
+        </p>
         </div>
 
         <button
@@ -662,16 +678,16 @@ if (loading) {
                     </span>
 
                     <input
-                      id="product-price"
-                      name="price"
-                      type="number"
-                      min="0.25"
-                      step="0.25"
-                      value={formData.price}
-                      onChange={handleInputChange}
-                      placeholder="0.00"
-                      className="w-full rounded-xl border border-slate-300 py-2.5 pl-8 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-                    />
+                    id="product-price"
+                    name="price"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={formData.price}
+                    onChange={handleInputChange}
+                    placeholder="0.00"
+                    className="w-full rounded-xl border border-slate-300 py-2.5 pl-8 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                  />
                   </div>
                 </div>
 

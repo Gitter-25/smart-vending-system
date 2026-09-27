@@ -20,13 +20,16 @@ function formatPaymentMethod(method) {
 
   const labels = {
     student_id: "Student ID",
+    qr: "Direct QR Payment",
   };
 
   return (
     labels[method] ||
     method
       .replaceAll("_", " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+      .replace(/\b\w/g, (letter) =>
+        letter.toUpperCase()
+      )
   );
 }
 
@@ -148,18 +151,22 @@ export default function Transactions() {
       }
 
       const formattedTransactions = (
-        data ?? []
-      ).map((transaction) => {
-        const dateInfo = formatTransactionDate(
-          transaction.created_at
-        );
+  data ?? []
+).map((transaction) => {
+  const dateInfo = formatTransactionDate(
+    transaction.created_at
+  );
 
-        const completedDateInfo =
-          formatTransactionDate(
-            transaction.completed_at
-          );
+  const completedDateInfo =
+    formatTransactionDate(
+      transaction.completed_at
+    );
 
-        return {
+  const isQrGuest =
+    transaction.payment_method === "qr" &&
+    !transaction.student_id;
+
+  return {
           id: transaction.id,
 
           transactionId:
@@ -168,12 +175,16 @@ export default function Transactions() {
           studentId: transaction.student_id,
 
           studentNumber:
-            transaction.students?.student_number ??
-            "Unknown",
+  transaction.students?.student_number ??
+  (isQrGuest
+    ? "Direct QR Payment"
+    : "Unknown"),
 
-          studentName:
-            transaction.students?.full_name ??
-            "Unknown Student",
+studentName:
+  transaction.students?.full_name ??
+  (isQrGuest
+    ? "QR Guest"
+    : "Unknown Student"),
 
           cardUid:
             transaction.student_cards?.card_uid ??
@@ -328,9 +339,8 @@ export default function Transactions() {
         </h1>
 
         <p className="mt-1 text-sm text-slate-500">
-          Monitor vending machine purchases and
-          student ID payments.
-        </p>
+        Monitor SVM-001 Student ID and Direct QR payment transactions.
+      </p>
       </div>
 
       {/* Page Error */}
@@ -654,6 +664,8 @@ export default function Transactions() {
               </div>
 
               <div className="divide-y divide-slate-100">
+                {selectedTransaction.studentId ? (
+              <>
                 <DetailRow
                   label="Student"
                   value={
@@ -674,6 +686,20 @@ export default function Transactions() {
                     selectedTransaction.cardUid
                   }
                 />
+              </>
+            ) : (
+                          <>
+                <DetailRow
+                  label="Customer"
+                  value="QR Guest"
+                />
+
+                <DetailRow
+                  label="Payment Type"
+                  value="Direct QR Payment"
+                />
+              </>
+            )}
 
                 <DetailRow
                   label="Product"

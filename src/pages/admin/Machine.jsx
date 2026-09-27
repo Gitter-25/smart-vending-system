@@ -42,12 +42,13 @@ export default function Machine() {
     setPageError("");
 
     try {
-      /*
-       * Load the first configured vending machine.
-       *
-       * We use maybeSingle() so the page still works
-       * even when no machine has been created yet.
-       */
+              /*
+        * SmartVend currently operates one physical
+        * vending machine: SVM-001.
+        *
+        * Load that machine explicitly instead of
+        * treating this page as fleet management.
+        */
       const { data: machineData, error: machineError } =
         await supabase
           .from("machines")
@@ -63,10 +64,7 @@ export default function Machine() {
               updated_at
             `
           )
-          .order("created_at", {
-            ascending: true,
-          })
-          .limit(1)
+          .eq("machine_code", "SVM-001")
           .maybeSingle();
 
       if (machineError) {
@@ -249,12 +247,12 @@ export default function Machine() {
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            Machine Management
+            SVM-001 Machine Monitor
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Monitor the vending machine, dispensing slots,
-            inventory, and hardware events.
+            Monitor SmartVend machine status, dispensing slots,
+            inventory, and system events.
           </p>
         </div>
 
@@ -337,10 +335,10 @@ export default function Machine() {
                   </div>
 
                   <p className="mt-1 text-sm text-slate-500">
-                    {machineOnline
-                      ? "The machine is reporting an online status."
-                      : "Physical ESP32-S3 hardware is not connected yet."}
-                  </p>
+                  {machineOnline
+                    ? "SVM-001 is enabled and available in the SmartVend backend."
+                    : "SVM-001 is currently marked offline in the SmartVend backend."}
+                </p>
                 </div>
               </div>
 
@@ -360,16 +358,10 @@ export default function Machine() {
           <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatusCard
               title="ESP32-S3 Controller"
-              value={
-                machineOnline
-                  ? "Connected"
-                  : "Not Connected"
-              }
-              description="Physical controller status"
+              value="Integration Pending"
+              description="Physical hardware phase"
               icon={Cpu}
-              status={
-                machineOnline ? "success" : "neutral"
-              }
+              status="warning"
             />
 
             <StatusCard
@@ -381,12 +373,28 @@ export default function Machine() {
             />
 
             <StatusCard
-              title="Ready Slots"
-              value={`${readySlots}/${slots.length}`}
-              description="Slots marked ready"
-              icon={CheckCircle2}
-              status="success"
-            />
+            title="Ready Slots"
+            value={`${readySlots}/${slots.length}`}
+            description={
+              readySlots === slots.length &&
+              slots.length > 0
+                ? "All configured slots ready"
+                : `${slots.length - readySlots} slot${
+                    slots.length - readySlots === 1
+                      ? ""
+                      : "s"
+                  } unavailable`
+            }
+            icon={CheckCircle2}
+            status={
+              readySlots === slots.length &&
+              slots.length > 0
+                ? "success"
+                : readySlots > 0
+                  ? "warning"
+                  : "error"
+            }
+          />
 
             <StatusCard
               title="Slot Errors"
@@ -433,10 +441,14 @@ export default function Machine() {
                 />
 
                 <InfoRow
-                  icon={Router}
-                  label="Connection"
-                  value="Not connected"
-                />
+                icon={Router}
+                label="Backend Status"
+                value={
+                  machineOnline
+                    ? "Online"
+                    : "Offline"
+                }
+              />
 
                 <InfoRow
                   icon={Radio}

@@ -10,7 +10,11 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { supabase } from "../../lib/supabase";
 
 function getStockStatus(quantity, capacity) {
@@ -22,7 +26,9 @@ function getStockStatus(quantity, capacity) {
     return "Full";
   }
 
-  if (quantity <= Math.ceil(capacity * 0.3)) {
+  if (
+    quantity <= Math.ceil(capacity * 0.3)
+  ) {
     return "Low Stock";
   }
 
@@ -30,37 +36,103 @@ function getStockStatus(quantity, capacity) {
 }
 
 export default function Inventory() {
-  const [inventory, setInventory] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [inventory, setInventory] =
+    useState([]);
 
-  const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState("");
+  const [products, setProducts] =
+    useState([]);
 
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  const [loading, setLoading] =
+    useState(true);
+
+  const [pageError, setPageError] =
+    useState("");
+
+  const [search, setSearch] =
+    useState("");
+
+  const [statusFilter, setStatusFilter] =
+    useState("All");
 
   // Product assignment
-  const [assignItem, setAssignItem] = useState(null);
-  const [selectedProductId, setSelectedProductId] =
+  const [assignItem, setAssignItem] =
+    useState(null);
+
+  const [
+    selectedProductId,
+    setSelectedProductId,
+  ] = useState("");
+
+  const [assignError, setAssignError] =
     useState("");
-  const [assignError, setAssignError] = useState("");
-  const [assigning, setAssigning] = useState(false);
+
+  const [assigning, setAssigning] =
+    useState(false);
 
   // Restocking
-  const [restockItem, setRestockItem] = useState(null);
-  const [restockQuantity, setRestockQuantity] =
-    useState("");
-  const [restockError, setRestockError] = useState("");
-  const [restocking, setRestocking] = useState(false);
+  const [restockItem, setRestockItem] =
+    useState(null);
 
-  // Load inventory and products
+  const [
+    restockQuantity,
+    setRestockQuantity,
+  ] = useState("");
+
+  const [restockError, setRestockError] =
+    useState("");
+
+  const [restocking, setRestocking] =
+    useState(false);
+
+  // -----------------------------------
+  // Load SVM-001 inventory and products
+  // -----------------------------------
   useEffect(() => {
+    let ignore = false;
+
     const loadInventory = async () => {
       setLoading(true);
       setPageError("");
 
-      const [slotsResult, productsResult] =
-        await Promise.all([
+      try {
+        /*
+         * SmartVend currently operates one
+         * physical vending machine.
+         *
+         * Always resolve SVM-001 first so
+         * inventory data is explicitly scoped
+         * to that machine.
+         */
+        const {
+          data: machineData,
+          error: machineError,
+        } = await supabase
+          .from("machines")
+          .select("id, machine_code")
+          .eq("machine_code", "SVM-001")
+          .maybeSingle();
+
+        if (machineError) {
+          throw machineError;
+        }
+
+        if (!machineData) {
+          if (!ignore) {
+            setInventory([]);
+            setProducts([]);
+            setPageError(
+              "SVM-001 is not configured in the database."
+            );
+            setLoading(false);
+          }
+
+          return;
+        }
+
+        const [
+          slotsResult,
+          productsResult,
+        ] = await Promise.all([
           supabase
             .from("vending_slots")
             .select(`
@@ -76,6 +148,10 @@ export default function Inventory() {
                 name
               )
             `)
+            .eq(
+              "machine_id",
+              machineData.id
+            )
             .order("motor_number", {
               ascending: true,
             }),
@@ -89,120 +165,167 @@ export default function Inventory() {
             }),
         ]);
 
-      if (slotsResult.error) {
+        if (slotsResult.error) {
+          throw slotsResult.error;
+        }
+
+        if (productsResult.error) {
+          throw productsResult.error;
+        }
+
+        const formattedInventory = (
+          slotsResult.data ?? []
+        ).map((slot) => ({
+          id: slot.id,
+
+          slot: slot.slot_code,
+
+          motorNumber:
+            slot.motor_number,
+
+          productId:
+            slot.product_id,
+
+          product:
+            slot.products?.name ??
+            "Unassigned",
+
+          quantity:
+            Number(slot.quantity || 0),
+
+          capacity:
+            Number(slot.capacity || 0),
+
+          slotStatus:
+            slot.status,
+        }));
+
+        if (!ignore) {
+          setInventory(
+            formattedInventory
+          );
+
+          setProducts(
+            productsResult.data ?? []
+          );
+
+          setPageError("");
+          setLoading(false);
+        }
+      } catch (error) {
         console.error(
-          "Unable to load inventory:",
-          slotsResult.error
+          "Unable to load SVM-001 inventory:",
+          error
         );
 
-        setPageError(
-          "Unable to load inventory. Please try again."
-        );
-        setLoading(false);
-        return;
+        if (!ignore) {
+          setInventory([]);
+          setProducts([]);
+
+          setPageError(
+            "Unable to load SVM-001 inventory. Please try again."
+          );
+
+          setLoading(false);
+        }
       }
-
-      if (productsResult.error) {
-        console.error(
-          "Unable to load products:",
-          productsResult.error
-        );
-
-        setPageError(
-          "Unable to load products. Please try again."
-        );
-        setLoading(false);
-        return;
-      }
-
-      const formattedInventory = (
-        slotsResult.data ?? []
-      ).map((slot) => ({
-        id: slot.id,
-        slot: slot.slot_code,
-        motorNumber: slot.motor_number,
-        productId: slot.product_id,
-        product:
-          slot.products?.name ?? "Unassigned",
-        quantity: slot.quantity,
-        capacity: slot.capacity,
-        slotStatus: slot.status,
-      }));
-
-      setInventory(formattedInventory);
-      setProducts(productsResult.data ?? []);
-      setLoading(false);
     };
 
     loadInventory();
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
-  // Add stock status to each slot
-  const inventoryWithStatus = useMemo(() => {
-    return inventory.map((item) => ({
-      ...item,
-      status: getStockStatus(
-        item.quantity,
-        item.capacity
-      ),
-    }));
-  }, [inventory]);
+  // -----------------------------------
+  // Stock status
+  // -----------------------------------
+  const inventoryWithStatus =
+    useMemo(() => {
+      return inventory.map((item) => ({
+        ...item,
 
+        status: getStockStatus(
+          item.quantity,
+          item.capacity
+        ),
+      }));
+    }, [inventory]);
+
+  // -----------------------------------
   // Search and filter
-  const filteredInventory = useMemo(() => {
-    return inventoryWithStatus.filter((item) => {
-      const searchValue = search
-        .trim()
-        .toLowerCase();
+  // -----------------------------------
+  const filteredInventory =
+    useMemo(() => {
+      return inventoryWithStatus.filter(
+        (item) => {
+          const searchValue = search
+            .trim()
+            .toLowerCase();
 
-      const matchesSearch =
-        item.product
-          .toLowerCase()
-          .includes(searchValue) ||
-        item.slot
-          .toLowerCase()
-          .includes(searchValue);
+          const matchesSearch =
+            item.product
+              .toLowerCase()
+              .includes(searchValue) ||
+            item.slot
+              .toLowerCase()
+              .includes(searchValue);
 
-      const matchesStatus =
-        statusFilter === "All" ||
-        item.status === statusFilter;
+          const matchesStatus =
+            statusFilter === "All" ||
+            item.status === statusFilter;
 
-      return matchesSearch && matchesStatus;
-    });
-  }, [
-    inventoryWithStatus,
-    search,
-    statusFilter,
-  ]);
+          return (
+            matchesSearch &&
+            matchesStatus
+          );
+        }
+      );
+    }, [
+      inventoryWithStatus,
+      search,
+      statusFilter,
+    ]);
 
+  // -----------------------------------
   // Statistics
+  // -----------------------------------
   const totalStock = inventory.reduce(
-    (total, item) => total + item.quantity,
+    (total, item) =>
+      total + item.quantity,
     0
   );
 
-  const totalCapacity = inventory.reduce(
-    (total, item) => total + item.capacity,
-    0
-  );
+  const totalCapacity =
+    inventory.reduce(
+      (total, item) =>
+        total + item.capacity,
+      0
+    );
 
   const lowStockCount =
     inventoryWithStatus.filter(
-      (item) => item.status === "Low Stock"
+      (item) =>
+        item.status === "Low Stock"
     ).length;
 
   const emptySlotCount =
     inventoryWithStatus.filter(
-      (item) => item.status === "Out of Stock"
+      (item) =>
+        item.status === "Out of Stock"
     ).length;
 
-  // -------------------------
+  // -----------------------------------
   // Product Assignment
-  // -------------------------
-
+  // -----------------------------------
   const openAssignModal = (item) => {
     setAssignItem(item);
-    setSelectedProductId(item.productId ?? "");
+
+    setSelectedProductId(
+      item.productId ?? ""
+    );
+
     setAssignError("");
   };
 
@@ -216,7 +339,9 @@ export default function Inventory() {
     setAssignError("");
   };
 
-  const handleAssignProduct = async (event) => {
+  const handleAssignProduct = async (
+    event
+  ) => {
     event.preventDefault();
 
     if (!assignItem) {
@@ -226,33 +351,86 @@ export default function Inventory() {
     setAssignError("");
 
     if (!selectedProductId) {
-      setAssignError("Select a product.");
+      setAssignError(
+        "Select a product."
+      );
       return;
     }
 
-    // Do not allow switching products while
-    // inventory is still inside the slot.
+    /*
+     * Prevent replacing the product
+     * assignment while physical stock
+     * remains in the slot.
+     */
     if (
       assignItem.productId &&
-      assignItem.productId !== selectedProductId &&
+      assignItem.productId !==
+        selectedProductId &&
       assignItem.quantity > 0
     ) {
       setAssignError(
         "Empty this slot before assigning a different product."
       );
+
+      return;
+    }
+
+    /*
+     * No database update is required when
+     * the currently assigned product was
+     * selected again.
+     */
+    if (
+      assignItem.productId ===
+      selectedProductId
+    ) {
+      closeAssignModal();
       return;
     }
 
     setAssigning(true);
 
-    const { error } = await supabase
-      .from("vending_slots")
-      .update({
-        product_id: selectedProductId,
-      })
-      .eq("id", assignItem.id);
+    try {
+      const { error } = await supabase
+        .from("vending_slots")
+        .update({
+          product_id:
+            selectedProductId,
+        })
+        .eq("id", assignItem.id);
 
-    if (error) {
+      if (error) {
+        throw error;
+      }
+
+      const selectedProduct =
+        products.find(
+          (product) =>
+            product.id ===
+            selectedProductId
+        );
+
+      setInventory((current) =>
+        current.map((item) =>
+          item.id === assignItem.id
+            ? {
+                ...item,
+
+                productId:
+                  selectedProductId,
+
+                product:
+                  selectedProduct?.name ??
+                  "Unassigned",
+              }
+            : item
+        )
+      );
+
+      setAssignItem(null);
+      setSelectedProductId("");
+      setAssignError("");
+    } catch (error) {
       console.error(
         "Unable to assign product:",
         error
@@ -261,41 +439,22 @@ export default function Inventory() {
       setAssignError(
         "Unable to assign product. Please try again."
       );
+    } finally {
       setAssigning(false);
+    }
+  };
+
+  // -----------------------------------
+  // Restocking
+  // -----------------------------------
+  const openRestockModal = (item) => {
+    if (!item.productId) {
       return;
     }
 
-    const selectedProduct = products.find(
-      (product) =>
-        product.id === selectedProductId
-    );
-
-    setInventory((current) =>
-      current.map((item) =>
-        item.id === assignItem.id
-          ? {
-              ...item,
-              productId: selectedProductId,
-              product:
-                selectedProduct?.name ??
-                "Unassigned",
-            }
-          : item
-      )
-    );
-
-    setAssigning(false);
-    setAssignItem(null);
-    setSelectedProductId("");
-    setAssignError("");
-  };
-
-  // -------------------------
-  // Restocking
-  // -------------------------
-
-  const openRestockModal = (item) => {
-    if (!item.productId) {
+    if (
+      item.quantity >= item.capacity
+    ) {
       return;
     }
 
@@ -314,7 +473,9 @@ export default function Inventory() {
     setRestockError("");
   };
 
-  const handleRestock = async (event) => {
+  const handleRestock = async (
+    event
+  ) => {
     event.preventDefault();
 
     if (!restockItem) {
@@ -327,10 +488,13 @@ export default function Inventory() {
       setRestockError(
         "Assign a product before restocking this slot."
       );
+
       return;
     }
 
-    const amount = Number(restockQuantity);
+    const amount = Number(
+      restockQuantity
+    );
 
     if (
       !restockQuantity ||
@@ -341,6 +505,7 @@ export default function Inventory() {
       setRestockError(
         "Enter a valid whole number of items to add."
       );
+
       return;
     }
 
@@ -348,12 +513,23 @@ export default function Inventory() {
       restockItem.capacity -
       restockItem.quantity;
 
+    if (availableSpace <= 0) {
+      setRestockError(
+        "This slot is already full."
+      );
+
+      return;
+    }
+
     if (amount > availableSpace) {
       setRestockError(
         `Only ${availableSpace} more item${
-          availableSpace === 1 ? "" : "s"
+          availableSpace === 1
+            ? ""
+            : "s"
         } can fit in this slot.`
       );
+
       return;
     }
 
@@ -362,14 +538,64 @@ export default function Inventory() {
 
     setRestocking(true);
 
-    const { error } = await supabase
-      .from("vending_slots")
-      .update({
-        quantity: newQuantity,
-      })
-      .eq("id", restockItem.id);
+    try {
+      /*
+       * Include the previous quantity in
+       * the update condition.
+       *
+       * This prevents this admin page from
+       * silently overwriting inventory if
+       * the slot quantity changed after the
+       * restock modal was opened.
+       */
+      const {
+        data: updatedSlot,
+        error,
+      } = await supabase
+        .from("vending_slots")
+        .update({
+          quantity: newQuantity,
+        })
+        .eq("id", restockItem.id)
+        .eq(
+          "quantity",
+          restockItem.quantity
+        )
+        .select(
+          "id, quantity, capacity"
+        )
+        .maybeSingle();
 
-    if (error) {
+      if (error) {
+        throw error;
+      }
+
+      if (!updatedSlot) {
+        setRestockError(
+          "The slot inventory changed before this restock was saved. Refresh the page and try again."
+        );
+
+        return;
+      }
+
+      setInventory((current) =>
+        current.map((item) =>
+          item.id === restockItem.id
+            ? {
+                ...item,
+
+                quantity: Number(
+                  updatedSlot.quantity
+                ),
+              }
+            : item
+        )
+      );
+
+      setRestockItem(null);
+      setRestockQuantity("");
+      setRestockError("");
+    } catch (error) {
       console.error(
         "Unable to restock slot:",
         error
@@ -378,28 +604,14 @@ export default function Inventory() {
       setRestockError(
         "Unable to update inventory. Please try again."
       );
+    } finally {
       setRestocking(false);
-      return;
     }
-
-    setInventory((current) =>
-      current.map((item) =>
-        item.id === restockItem.id
-          ? {
-              ...item,
-              quantity: newQuantity,
-            }
-          : item
-      )
-    );
-
-    setRestocking(false);
-    setRestockItem(null);
-    setRestockQuantity("");
-    setRestockError("");
   };
 
-  // Loading screen
+  // -----------------------------------
+  // Loading
+  // -----------------------------------
   if (loading) {
     return (
       <div className="flex min-h-[300px] items-center justify-center">
@@ -410,7 +622,8 @@ export default function Inventory() {
           />
 
           <p className="mt-3 text-sm text-slate-500">
-            Loading inventory...
+            Loading SVM-001
+            inventory...
           </p>
         </div>
       </div>
@@ -426,8 +639,9 @@ export default function Inventory() {
         </h1>
 
         <p className="mt-1 text-sm text-slate-500">
-          Monitor vending machine stock levels and
-          product slots.
+          Monitor SVM-001 stock levels,
+          product assignments, and
+          dispensing slots.
         </p>
       </div>
 
@@ -487,7 +701,9 @@ export default function Inventory() {
               type="text"
               value={search}
               onChange={(event) =>
-                setSearch(event.target.value)
+                setSearch(
+                  event.target.value
+                )
               }
               placeholder="Search product or slot..."
               className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
@@ -504,7 +720,9 @@ export default function Inventory() {
             <select
               value={statusFilter}
               onChange={(event) =>
-                setStatusFilter(event.target.value)
+                setStatusFilter(
+                  event.target.value
+                )
               }
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
             >
@@ -553,7 +771,11 @@ export default function Inventory() {
                 </th>
 
                 <th className="px-6 py-3 font-medium">
-                  Status
+                  Stock Status
+                </th>
+
+                <th className="px-6 py-3 font-medium">
+                  Slot Status
                 </th>
 
                 <th className="px-6 py-3 text-right font-medium">
@@ -563,124 +785,160 @@ export default function Inventory() {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredInventory.map((item) => (
-                <tr
-                  key={item.id}
-                  className="transition hover:bg-slate-50"
-                >
-                  {/* Slot */}
-                  <td className="px-6 py-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-600">
-                      {item.slot}
-                    </div>
-
-                    <p className="mt-1 text-xs text-slate-400">
-                      Motor {item.motorNumber}
-                    </p>
-                  </td>
-
-                  {/* Product */}
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-                        <Package size={18} />
+              {filteredInventory.map(
+                (item) => (
+                  <tr
+                    key={item.id}
+                    className="transition hover:bg-slate-50"
+                  >
+                    {/* Slot */}
+                    <td className="px-6 py-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-600">
+                        {item.slot}
                       </div>
 
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">
-                          {item.product}
-                        </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Motor{" "}
+                        {item.motorNumber}
+                      </p>
+                    </td>
 
-                        {!item.productId && (
-                          <p className="mt-0.5 text-xs text-slate-400">
-                            No product assigned
+                    {/* Product */}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                          <Package
+                            size={18}
+                          />
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">
+                            {item.product}
                           </p>
-                        )}
+
+                          {!item.productId && (
+                            <p className="mt-0.5 text-xs text-slate-400">
+                              No product
+                              assigned
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </td>
+                    </td>
 
-                  {/* Stock */}
-                  <td className="px-6 py-4">
-                    <div className="w-32">
-                      <div className="mb-2 flex items-center justify-between text-sm">
-                        <span className="font-semibold text-slate-800">
-                          {item.quantity}
-                        </span>
+                    {/* Stock */}
+                    <td className="px-6 py-4">
+                      <div className="w-32">
+                        <div className="mb-2 flex items-center justify-between text-sm">
+                          <span className="font-semibold text-slate-800">
+                            {item.quantity}
+                          </span>
 
-                        <span className="text-xs text-slate-400">
-                          / {item.capacity}
-                        </span>
+                          <span className="text-xs text-slate-400">
+                            /{" "}
+                            {item.capacity}
+                          </span>
+                        </div>
+
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{
+                              width:
+                                item.capacity >
+                                0
+                                  ? `${Math.min(
+                                      (item.quantity /
+                                        item.capacity) *
+                                        100,
+                                      100
+                                    )}%`
+                                  : "0%",
+                            }}
+                          />
+                        </div>
                       </div>
+                    </td>
 
-                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-blue-600"
-                          style={{
-                            width: `${
-                              (item.quantity /
-                                item.capacity) *
-                              100
-                            }%`,
-                          }}
-                        />
+                    {/* Capacity */}
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {item.capacity}{" "}
+                      {item.capacity === 1
+                        ? "item"
+                        : "items"}
+                    </td>
+
+                    {/* Stock Status */}
+                    <td className="px-6 py-4">
+                      <StockStatusBadge
+                        status={
+                          item.status
+                        }
+                      />
+                    </td>
+
+                    {/* Slot Status */}
+                    <td className="px-6 py-4">
+                      <SlotStatusBadge
+                        status={
+                          item.slotStatus
+                        }
+                      />
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-6 py-4">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openAssignModal(
+                              item
+                            )
+                          }
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                        >
+                          <Pencil
+                            size={15}
+                          />
+
+                          {item.productId
+                            ? "Change"
+                            : "Assign"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openRestockModal(
+                              item
+                            )
+                          }
+                          disabled={
+                            !item.productId ||
+                            item.quantity >=
+                              item.capacity
+                          }
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <RefreshCw
+                            size={15}
+                          />
+
+                          Restock
+                        </button>
                       </div>
-                    </div>
-                  </td>
-
-                  {/* Capacity */}
-                  <td className="px-6 py-4 text-sm text-slate-600">
-                    {item.capacity} items
-                  </td>
-
-                  {/* Status */}
-                  <td className="px-6 py-4">
-                    <StockStatusBadge
-                      status={item.status}
-                    />
-                  </td>
-
-                  {/* Actions */}
-                  <td className="px-6 py-4">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          openAssignModal(item)
-                        }
-                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                      >
-                        <Pencil size={15} />
-
-                        {item.productId
-                          ? "Change"
-                          : "Assign"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          openRestockModal(item)
-                        }
-                        disabled={
-                          !item.productId ||
-                          item.quantity >=
-                            item.capacity
-                        }
-                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        <RefreshCw size={15} />
-                        Restock
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
 
           {/* Empty Results */}
-          {filteredInventory.length === 0 && (
+          {filteredInventory.length ===
+            0 && (
             <div className="px-6 py-14 text-center">
               <PackageOpen
                 size={34}
@@ -692,8 +950,8 @@ export default function Inventory() {
               </p>
 
               <p className="mt-1 text-sm text-slate-400">
-                Try changing your search or stock
-                filter.
+                Try changing your search
+                or stock filter.
               </p>
             </div>
           )}
@@ -702,8 +960,10 @@ export default function Inventory() {
         {/* Footer */}
         <div className="border-t border-slate-200 px-6 py-4">
           <p className="text-sm text-slate-500">
-            Showing {filteredInventory.length} of{" "}
-            {inventory.length} vending slots
+            Showing{" "}
+            {filteredInventory.length} of{" "}
+            {inventory.length} SVM-001
+            slots
           </p>
         </div>
       </div>
@@ -720,14 +980,17 @@ export default function Inventory() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Select a product for slot{" "}
+                  Select a product for
+                  SVM-001 slot{" "}
                   {assignItem.slot}.
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={closeAssignModal}
+                onClick={
+                  closeAssignModal
+                }
                 disabled={assigning}
                 className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
                 aria-label="Close"
@@ -736,11 +999,25 @@ export default function Inventory() {
               </button>
             </div>
 
-            <form onSubmit={handleAssignProduct}>
+            <form
+              onSubmit={
+                handleAssignProduct
+              }
+            >
               <div className="space-y-5 p-6">
                 {/* Slot Information */}
                 <div className="rounded-xl bg-slate-50 p-4">
                   <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-500">
+                      Machine
+                    </span>
+
+                    <span className="font-semibold text-slate-900">
+                      SVM-001
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between">
                     <span className="text-sm text-slate-500">
                       Slot
                     </span>
@@ -756,7 +1033,9 @@ export default function Inventory() {
                     </span>
 
                     <span className="font-semibold text-slate-900">
-                      {assignItem.motorNumber}
+                      {
+                        assignItem.motorNumber
+                      }
                     </span>
                   </div>
 
@@ -766,8 +1045,13 @@ export default function Inventory() {
                     </span>
 
                     <span className="font-semibold text-slate-900">
-                      {assignItem.quantity} /{" "}
-                      {assignItem.capacity}
+                      {
+                        assignItem.quantity
+                      }{" "}
+                      /{" "}
+                      {
+                        assignItem.capacity
+                      }
                     </span>
                   </div>
                 </div>
@@ -783,7 +1067,9 @@ export default function Inventory() {
 
                   <select
                     id="product-assignment"
-                    value={selectedProductId}
+                    value={
+                      selectedProductId
+                    }
                     onChange={(event) =>
                       setSelectedProductId(
                         event.target.value
@@ -796,20 +1082,30 @@ export default function Inventory() {
                       Select a product
                     </option>
 
-                    {products.map((product) => (
-                      <option
-                        key={product.id}
-                        value={product.id}
-                      >
-                        {product.name}
-                      </option>
-                    ))}
+                    {products.map(
+                      (product) => (
+                        <option
+                          key={
+                            product.id
+                          }
+                          value={
+                            product.id
+                          }
+                        >
+                          {
+                            product.name
+                          }
+                        </option>
+                      )
+                    )}
                   </select>
 
-                  {products.length === 0 && (
+                  {products.length ===
+                    0 && (
                     <p className="mt-2 text-xs text-amber-600">
-                      No active products are
-                      available. Add a product first.
+                      No active products
+                      are available. Add a
+                      product first.
                     </p>
                   )}
                 </div>
@@ -829,7 +1125,9 @@ export default function Inventory() {
               <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
                 <button
                   type="button"
-                  onClick={closeAssignModal}
+                  onClick={
+                    closeAssignModal
+                  }
                   disabled={assigning}
                   className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -862,18 +1160,24 @@ export default function Inventory() {
             <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  Restock Slot {restockItem.slot}
+                  Restock Slot{" "}
+                  {restockItem.slot}
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
                   Add stock for{" "}
-                  {restockItem.product}.
+                  {
+                    restockItem.product
+                  }{" "}
+                  in SVM-001.
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={closeRestockModal}
+                onClick={
+                  closeRestockModal
+                }
                 disabled={restocking}
                 className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
                 aria-label="Close"
@@ -882,7 +1186,9 @@ export default function Inventory() {
               </button>
             </div>
 
-            <form onSubmit={handleRestock}>
+            <form
+              onSubmit={handleRestock}
+            >
               <div className="space-y-5 p-6">
                 {/* Current Stock */}
                 <div className="rounded-xl bg-slate-50 p-4">
@@ -892,7 +1198,9 @@ export default function Inventory() {
                     </span>
 
                     <span className="font-semibold text-slate-900">
-                      {restockItem.product}
+                      {
+                        restockItem.product
+                      }
                     </span>
                   </div>
 
@@ -902,8 +1210,13 @@ export default function Inventory() {
                     </span>
 
                     <span className="font-semibold text-slate-900">
-                      {restockItem.quantity} /{" "}
-                      {restockItem.capacity}
+                      {
+                        restockItem.quantity
+                      }{" "}
+                      /{" "}
+                      {
+                        restockItem.capacity
+                      }
                     </span>
                   </div>
 
@@ -937,7 +1250,9 @@ export default function Inventory() {
                       restockItem.quantity
                     }
                     step="1"
-                    value={restockQuantity}
+                    value={
+                      restockQuantity
+                    }
                     onChange={(event) =>
                       setRestockQuantity(
                         event.target.value
@@ -965,7 +1280,9 @@ export default function Inventory() {
               <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
                 <button
                   type="button"
-                  onClick={closeRestockModal}
+                  onClick={
+                    closeRestockModal
+                  }
                   disabled={restocking}
                   className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -1023,11 +1340,15 @@ function InventoryStatCard({
 
 function StockStatusBadge({ status }) {
   const styles = {
-    Full: "bg-blue-50 text-blue-700",
+    Full:
+      "bg-blue-50 text-blue-700",
+
     "In Stock":
       "bg-green-50 text-green-700",
+
     "Low Stock":
       "bg-amber-50 text-amber-700",
+
     "Out of Stock":
       "bg-red-50 text-red-700",
   };
@@ -1039,14 +1360,53 @@ function StockStatusBadge({ status }) {
     "Out of Stock": PackageOpen,
   };
 
-  const Icon = icons[status];
+  const Icon =
+    icons[status] ?? Package;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${styles[status]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+        styles[status] ??
+        "bg-slate-100 text-slate-700"
+      }`}
     >
       <Icon size={13} />
       {status}
+    </span>
+  );
+}
+
+function SlotStatusBadge({ status }) {
+  const normalizedStatus =
+    status?.toLowerCase() ?? "unknown";
+
+  const styles = {
+    ready:
+      "bg-green-50 text-green-700",
+
+    error:
+      "bg-red-50 text-red-700",
+
+    disabled:
+      "bg-slate-100 text-slate-600",
+  };
+
+  const labels = {
+    ready: "Ready",
+    error: "Error",
+    disabled: "Disabled",
+  };
+
+  return (
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+        styles[normalizedStatus] ??
+        "bg-slate-100 text-slate-600"
+      }`}
+    >
+      {labels[normalizedStatus] ??
+        status ??
+        "Unknown"}
     </span>
   );
 }

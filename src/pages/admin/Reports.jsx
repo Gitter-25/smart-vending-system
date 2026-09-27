@@ -103,7 +103,6 @@ function buildSalesData(
   }
 
   const dailyMap = new Map();
-
   const currentDate = new Date(startDate);
 
   while (currentDate <= now) {
@@ -261,71 +260,72 @@ export default function Reports() {
     useState("");
 
   useEffect(() => {
-  let ignore = false;
+    let ignore = false;
 
-  const loadReportData = async () => {
-    try {
-      const startDate = getStartDate(dateRange);
+    const loadReportData = async () => {
+      try {
+        const startDate =
+          getStartDate(dateRange);
 
-      let query = supabase
-        .from("vending_transactions")
-        .select(
-          `
-            id,
-            transaction_code,
-            product_name,
-            amount,
-            status,
-            created_at,
-            completed_at,
-            product_id
-          `
-        )
-        .order("created_at", {
-          ascending: true,
-        });
+        let query = supabase
+          .from("vending_transactions")
+          .select(
+            `
+              id,
+              transaction_code,
+              product_name,
+              amount,
+              status,
+              created_at,
+              completed_at,
+              product_id
+            `
+          )
+          .order("created_at", {
+            ascending: true,
+          });
 
-      if (startDate) {
-        query = query.gte(
-          "created_at",
-          startDate.toISOString()
+        if (startDate) {
+          query = query.gte(
+            "created_at",
+            startDate.toISOString()
+          );
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          throw error;
+        }
+
+        if (!ignore) {
+          setTransactions(data || []);
+          setPageError("");
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error(
+          "Unable to load report data:",
+          error
         );
+
+        if (!ignore) {
+          setTransactions([]);
+          setPageError(
+            error.message ||
+              "Unable to load report data."
+          );
+          setLoading(false);
+        }
       }
+    };
 
-      const { data, error } = await query;
+    loadReportData();
 
-      if (error) {
-        throw error;
-      }
-
-      if (!ignore) {
-        setTransactions(data || []);
-        setPageError("");
-        setLoading(false);
-      }
-    } catch (error) {
-      console.error(
-        "Unable to load report data:",
-        error
-      );
-
-      if (!ignore) {
-        setTransactions([]);
-        setPageError(
-          error.message ||
-            "Unable to load report data."
-        );
-        setLoading(false);
-      }
-    }
-  };
-
-  loadReportData();
-
-  return () => {
-    ignore = true;
-  };
-}, [dateRange]);
+    return () => {
+      ignore = true;
+    };
+  }, [dateRange]);
 
   const successfulTransactions =
     useMemo(
@@ -336,6 +336,15 @@ export default function Reports() {
         ),
       [transactions]
     );
+
+  const completedTransactions = useMemo(
+    () =>
+      transactions.filter(
+        (transaction) =>
+          transaction.status !== "pending"
+      ),
+    [transactions]
+  );
 
   const totalSales = useMemo(
     () =>
@@ -352,17 +361,19 @@ export default function Reports() {
     successfulTransactions.length;
 
   const successRate = useMemo(() => {
-    if (transactions.length === 0) {
+    if (
+      completedTransactions.length === 0
+    ) {
       return 0;
     }
 
     return (
       (successfulTransactions.length /
-        transactions.length) *
+        completedTransactions.length) *
       100
     );
   }, [
-    transactions,
+    completedTransactions,
     successfulTransactions,
   ]);
 
@@ -405,9 +416,8 @@ export default function Reports() {
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Review vending machine sales,
-            products, and transaction
-            performance.
+            Review SVM-001 sales, products,
+            and transaction performance.
           </p>
         </div>
 
@@ -423,9 +433,11 @@ export default function Reports() {
             id="report-range"
             value={dateRange}
             onChange={(event) => {
-  setLoading(true);
-  setDateRange(event.target.value);
-}}
+              setLoading(true);
+              setDateRange(
+                event.target.value
+              );
+            }}
             disabled={loading}
             className="min-w-44 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -473,7 +485,7 @@ export default function Reports() {
               ? "..."
               : transactions.length
           }
-          description="Recorded purchases"
+          description="Recorded transactions"
           icon={CreditCard}
         />
 
@@ -482,7 +494,7 @@ export default function Reports() {
           value={
             loading ? "..." : itemsSold
           }
-          description="Successfully dispensed"
+          description="Successful transactions"
           icon={ShoppingBag}
         />
 
@@ -493,7 +505,7 @@ export default function Reports() {
               ? "..."
               : `${successRate.toFixed(1)}%`
           }
-          description="Successful transactions"
+          description="Of completed transactions"
           icon={CheckCircle2}
         />
       </div>
@@ -509,8 +521,8 @@ export default function Reports() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                Daily successful vending
-                machine sales
+                Daily successful SVM-001
+                transactions
               </p>
             </div>
 
@@ -572,7 +584,9 @@ export default function Reports() {
                       value,
                       name
                     ) => {
-                      if (name === "sales") {
+                      if (
+                        name === "sales"
+                      ) {
                         return [
                           formatCurrency(
                             value
@@ -593,7 +607,12 @@ export default function Reports() {
                   <Bar
                     dataKey="sales"
                     fill="#2563eb"
-                    radius={[6, 6, 0, 0]}
+                    radius={[
+                      6,
+                      6,
+                      0,
+                      0,
+                    ]}
                   />
                 </BarChart>
               </ResponsiveContainer>
@@ -609,7 +628,7 @@ export default function Reports() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Payment result distribution
+              Transaction result distribution
             </p>
           </div>
 
@@ -639,9 +658,14 @@ export default function Reports() {
                       paddingAngle={4}
                     >
                       {transactionStatusData.map(
-                        (entry, index) => (
+                        (
+                          entry,
+                          index
+                        ) => (
                           <Cell
-                            key={entry.name}
+                            key={
+                              entry.name
+                            }
                             fill={
                               chartColors[
                                 index %
@@ -727,8 +751,8 @@ export default function Reports() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Product performance by
-              successful purchases
+              Product performance from
+              successful transactions
             </p>
           </div>
 
@@ -748,8 +772,9 @@ export default function Reports() {
               </p>
 
               <p className="mt-1 text-sm text-slate-400">
-                Successful vending purchases
-                will appear here.
+                Successful vending
+                transactions will appear
+                here.
               </p>
             </div>
           ) : (
@@ -773,9 +798,14 @@ export default function Reports() {
 
                 <tbody className="divide-y divide-slate-100">
                   {productSales.map(
-                    (product, index) => (
+                    (
+                      product,
+                      index
+                    ) => (
                       <tr
-                        key={product.product}
+                        key={
+                          product.product
+                        }
                         className="transition hover:bg-slate-50"
                       >
                         <td className="px-6 py-4">
@@ -835,7 +865,8 @@ export default function Reports() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Current vending performance
+              SVM-001 performance for the
+              selected period
             </p>
           </div>
 
@@ -888,9 +919,9 @@ export default function Reports() {
           <div className="border-t border-slate-200 px-6 py-4">
             <p className="text-xs leading-5 text-slate-400">
               Analytics are generated from
-              vending transaction records stored
-              in Supabase for the selected report
-              period.
+              vending transaction records
+              stored in Supabase for the
+              selected report period.
             </p>
           </div>
         </div>
@@ -975,8 +1006,8 @@ function ChartEmptyState() {
       </p>
 
       <p className="mt-1 text-xs text-slate-400">
-        No vending transactions were recorded
-        during this period.
+        No vending transactions were
+        recorded during this period.
       </p>
     </div>
   );

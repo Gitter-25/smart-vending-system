@@ -1619,21 +1619,25 @@ const [qrRefundError, setQrRefundError] =
               number="4"
               title="Result"
               description={
-                dispenseResult?.success
-                  ? "Transaction complete"
-                  : dispenseResult
-                    ? paymentMethod === "qr"
-                      ? "Refund recovery required"
-                      : "Recovery complete"
-                    : "Success or recovery"
+              dispenseResult?.success
+              ? "Transaction complete"
+              : dispenseResult
+                ? paymentMethod === "qr"
+                ? qrRefundResult
+                ? "Refund recovery complete"
+                : "Refund recovery required"
+              : "Recovery complete"
+              : "Success or recovery"
               }
               completed={Boolean(
-                dispenseResult?.success
+              dispenseResult?.success ||
+                qrRefundResult
               )}
               failed={Boolean(
-                dispenseResult &&
-                  !dispenseResult.success
-              )}
+              dispenseResult &&
+              !dispenseResult.success &&
+              !qrRefundResult
+            )}
             />
           </div>
 

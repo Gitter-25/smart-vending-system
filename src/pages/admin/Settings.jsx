@@ -10,7 +10,12 @@ import {
   ShieldCheck,
   User,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { supabase } from "../../lib/supabase";
 
 const defaultSettings = {
@@ -23,7 +28,7 @@ const defaultSettings = {
   currency: "PHP",
   lowStockThreshold: 3,
 
-  paymentMethod: "Student ID Card",
+  paymentMethod: "Student ID + QR",
   requireActiveCard: true,
   preventNegativeBalance: true,
 
@@ -36,17 +41,28 @@ const defaultSettings = {
 };
 
 export default function Settings() {
-  const [settings, setSettings] = useState(defaultSettings);
+  const [settings, setSettings] =
+    useState(defaultSettings);
+
   const [savedSettings, setSavedSettings] =
     useState(defaultSettings);
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] =
+    useState(true);
 
-  const [pageError, setPageError] = useState("");
-  const [saveError, setSaveError] = useState("");
-  const [showSavedMessage, setShowSavedMessage] =
+  const [saving, setSaving] =
     useState(false);
+
+  const [pageError, setPageError] =
+    useState("");
+
+  const [saveError, setSaveError] =
+    useState("");
+
+  const [
+    showSavedMessage,
+    setShowSavedMessage,
+  ] = useState(false);
 
   const hasChanges = useMemo(
     () =>
@@ -55,167 +71,208 @@ export default function Settings() {
     [settings, savedSettings]
   );
 
-  const loadSettings = useCallback(async () => {
-    setLoading(true);
-    setPageError("");
+  // ==========================================
+  // Load Settings
+  // ==========================================
 
-    try {
-      /*
-       * Get authenticated administrator.
-       */
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+  const loadSettings = useCallback(
+    async () => {
+      setLoading(true);
+      setPageError("");
 
-      if (userError) {
-        throw userError;
-      }
+      try {
+        // --------------------------------------
+        // Authenticated administrator
+        // --------------------------------------
 
-      if (!user) {
-        throw new Error(
-          "No authenticated administrator was found."
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError) {
+          throw userError;
+        }
+
+        if (!user) {
+          throw new Error(
+            "No authenticated administrator was found."
+          );
+        }
+
+        // --------------------------------------
+        // Administrator profile
+        // --------------------------------------
+
+        const {
+          data: adminProfile,
+          error: adminError,
+        } = await supabase
+          .from("admin_profiles")
+          .select(
+            "id, full_name, role, status"
+          )
+          .eq("id", user.id)
+          .single();
+
+        if (adminError) {
+          throw adminError;
+        }
+
+        // --------------------------------------
+        // SVM-001
+        // --------------------------------------
+        //
+        // SmartVend currently operates one
+        // physical vending machine.
+        //
+        // Explicitly select SVM-001 rather than
+        // relying on the first machine record.
+        // --------------------------------------
+
+        const {
+          data: machine,
+          error: machineError,
+        } = await supabase
+          .from("machines")
+          .select(
+            `
+              id,
+              machine_code,
+              name,
+              location,
+              status
+            `
+          )
+          .eq(
+            "machine_code",
+            "SVM-001"
+          )
+          .maybeSingle();
+
+        if (machineError) {
+          throw machineError;
+        }
+
+        if (!machine) {
+          throw new Error(
+            "SVM-001 is not configured in the database."
+          );
+        }
+
+        // --------------------------------------
+        // System settings
+        // --------------------------------------
+
+        const {
+          data: systemSettings,
+          error: settingsError,
+        } = await supabase
+          .from("system_settings")
+          .select(
+            `
+              id,
+              machine_id,
+              currency,
+              low_stock_threshold,
+              require_active_card,
+              prevent_negative_balance,
+              low_stock_alerts,
+              machine_offline_alerts,
+              transaction_failure_alerts
+            `
+          )
+          .eq(
+            "machine_id",
+            machine.id
+          )
+          .maybeSingle();
+
+        if (settingsError) {
+          throw settingsError;
+        }
+
+        const loadedSettings = {
+          machineId: machine.id,
+
+          settingsId:
+            systemSettings?.id ??
+            null,
+
+          machineName:
+            machine.name ?? "",
+
+          machineLocation:
+            machine.location ?? "",
+
+          currency:
+            systemSettings?.currency ??
+            "PHP",
+
+          lowStockThreshold:
+            systemSettings
+              ?.low_stock_threshold ??
+            3,
+
+          paymentMethod:
+            "Student ID + QR",
+
+          requireActiveCard:
+            systemSettings
+              ?.require_active_card ??
+            true,
+
+          preventNegativeBalance:
+            systemSettings
+              ?.prevent_negative_balance ??
+            true,
+
+          lowStockAlerts:
+            systemSettings
+              ?.low_stock_alerts ??
+            true,
+
+          machineOfflineAlerts:
+            systemSettings
+              ?.machine_offline_alerts ??
+            true,
+
+          transactionFailureAlerts:
+            systemSettings
+              ?.transaction_failure_alerts ??
+            true,
+
+          adminName:
+            adminProfile?.full_name ??
+            "Administrator",
+
+          adminEmail:
+            user.email ?? "",
+        };
+
+        setSettings(
+          loadedSettings
         );
-      }
 
-      /*
-       * Load administrator profile.
-       */
-      const {
-        data: adminProfile,
-        error: adminError,
-      } = await supabase
-        .from("admin_profiles")
-        .select("id, full_name, role, status")
-        .eq("id", user.id)
-        .single();
-
-      if (adminError) {
-        throw adminError;
-      }
-
-      /*
-       * Load the vending machine.
-       *
-       * For the current project we have one machine.
-       * Later, this can be changed into multi-machine
-       * management if needed.
-       */
-      const {
-        data: machines,
-        error: machineError,
-      } = await supabase
-        .from("machines")
-        .select(
-          `
-            id,
-            machine_code,
-            name,
-            location,
-            status
-          `
-        )
-        .order("created_at", {
-          ascending: true,
-        })
-        .limit(1);
-
-      if (machineError) {
-        throw machineError;
-      }
-
-      const machine = machines?.[0];
-
-      if (!machine) {
-        throw new Error(
-          "No vending machine record was found."
+        setSavedSettings(
+          loadedSettings
         );
+      } catch (error) {
+        console.error(
+          "Unable to load settings:",
+          error
+        );
+
+        setPageError(
+          error?.message ||
+            "Unable to load system settings."
+        );
+      } finally {
+        setLoading(false);
       }
-
-      /*
-       * Load system settings belonging to this machine.
-       */
-      const {
-        data: systemSettings,
-        error: settingsError,
-      } = await supabase
-        .from("system_settings")
-        .select(
-          `
-            id,
-            machine_id,
-            currency,
-            low_stock_threshold,
-            require_active_card,
-            prevent_negative_balance,
-            low_stock_alerts,
-            machine_offline_alerts,
-            transaction_failure_alerts
-          `
-        )
-        .eq("machine_id", machine.id)
-        .maybeSingle();
-
-      if (settingsError) {
-        throw settingsError;
-      }
-
-      const loadedSettings = {
-        machineId: machine.id,
-        settingsId: systemSettings?.id ?? null,
-
-        machineName: machine.name ?? "",
-        machineLocation: machine.location ?? "",
-
-        currency:
-          systemSettings?.currency ?? "PHP",
-
-        lowStockThreshold:
-          systemSettings?.low_stock_threshold ?? 3,
-
-        paymentMethod: "Student ID Card",
-
-        requireActiveCard:
-          systemSettings?.require_active_card ?? true,
-
-        preventNegativeBalance:
-          systemSettings?.prevent_negative_balance ??
-          true,
-
-        lowStockAlerts:
-          systemSettings?.low_stock_alerts ?? true,
-
-        machineOfflineAlerts:
-          systemSettings?.machine_offline_alerts ??
-          true,
-
-        transactionFailureAlerts:
-          systemSettings
-            ?.transaction_failure_alerts ?? true,
-
-        adminName:
-          adminProfile?.full_name ??
-          "Administrator",
-
-        adminEmail: user.email ?? "",
-      };
-
-      setSettings(loadedSettings);
-      setSavedSettings(loadedSettings);
-    } catch (error) {
-      console.error(
-        "Unable to load settings:",
-        error
-      );
-
-      setPageError(
-        error?.message ||
-          "Unable to load system settings."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -235,7 +292,14 @@ export default function Settings() {
     };
   }, [loadSettings]);
 
-  const updateSetting = (field, value) => {
+  // ==========================================
+  // Update Local Setting
+  // ==========================================
+
+  const updateSetting = (
+    field,
+    value
+  ) => {
     setSettings((current) => ({
       ...current,
       [field]: value,
@@ -245,15 +309,22 @@ export default function Settings() {
     setSaveError("");
   };
 
+  // ==========================================
+  // Save Settings
+  // ==========================================
+
   const handleSave = async () => {
     if (!settings.machineId) {
       setSaveError(
-        "The vending machine record could not be identified."
+        "SVM-001 could not be identified."
       );
+
       return;
     }
 
-    const machineName = settings.machineName.trim();
+    const machineName =
+      settings.machineName.trim();
+
     const machineLocation =
       settings.machineLocation.trim();
 
@@ -261,30 +332,37 @@ export default function Settings() {
       setSaveError(
         "Machine name cannot be empty."
       );
+
       return;
     }
 
-    const lowStockThreshold = Number(
-      settings.lowStockThreshold
-    );
+    const lowStockThreshold =
+      Number(
+        settings.lowStockThreshold
+      );
 
     if (
-      !Number.isInteger(lowStockThreshold) ||
+      !Number.isInteger(
+        lowStockThreshold
+      ) ||
       lowStockThreshold < 0 ||
       lowStockThreshold > 100
     ) {
       setSaveError(
         "Low stock threshold must be a whole number from 0 to 100."
       );
+
       return;
     }
 
-    const adminName = settings.adminName.trim();
+    const adminName =
+      settings.adminName.trim();
 
     if (!adminName) {
       setSaveError(
         "Administrator name cannot be empty."
       );
+
       return;
     }
 
@@ -293,42 +371,56 @@ export default function Settings() {
     setShowSavedMessage(false);
 
     try {
-      /*
-       * Update machine information.
-       */
+      // --------------------------------------
+      // Update SVM-001
+      // --------------------------------------
+
       const {
-        error: machineUpdateError,
+        error:
+          machineUpdateError,
       } = await supabase
         .from("machines")
         .update({
           name: machineName,
+
           location:
-            machineLocation || null,
+            machineLocation ||
+            null,
+
           updated_at:
             new Date().toISOString(),
         })
-        .eq("id", settings.machineId);
+        .eq(
+          "id",
+          settings.machineId
+        );
 
       if (machineUpdateError) {
         throw machineUpdateError;
       }
 
-      /*
-       * Save system settings.
-       *
-       * Upsert allows this to work whether the
-       * settings record already exists or not.
-       */
+      // --------------------------------------
+      // System settings
+      // --------------------------------------
+      //
+      // Upsert supports both an existing
+      // settings row and first-time creation.
+      // --------------------------------------
+
       const {
-        data: savedSystemSettings,
-        error: systemSettingsError,
+        data:
+          savedSystemSettings,
+        error:
+          systemSettingsError,
       } = await supabase
         .from("system_settings")
         .upsert(
           {
-            machine_id: settings.machineId,
+            machine_id:
+              settings.machineId,
 
-            currency: settings.currency,
+            currency:
+              settings.currency,
 
             low_stock_threshold:
               lowStockThreshold,
@@ -352,7 +444,8 @@ export default function Settings() {
               new Date().toISOString(),
           },
           {
-            onConflict: "machine_id",
+            onConflict:
+              "machine_id",
           }
         )
         .select(
@@ -374,12 +467,14 @@ export default function Settings() {
         throw systemSettingsError;
       }
 
-      /*
-       * Update administrator display name.
-       *
-       * Email is intentionally not changed here.
-       * Authentication email belongs to Supabase Auth.
-       */
+      // --------------------------------------
+      // Administrator profile
+      // --------------------------------------
+      //
+      // Authentication email is intentionally
+      // not changed from this page.
+      // --------------------------------------
+
       const {
         data: { user },
         error: userError,
@@ -396,11 +491,14 @@ export default function Settings() {
       }
 
       const {
-        error: adminUpdateError,
+        error:
+          adminUpdateError,
       } = await supabase
         .from("admin_profiles")
         .update({
-          full_name: adminName,
+          full_name:
+            adminName,
+
           updated_at:
             new Date().toISOString(),
         })
@@ -417,6 +515,7 @@ export default function Settings() {
           savedSystemSettings.id,
 
         machineName,
+
         machineLocation,
 
         lowStockThreshold,
@@ -424,8 +523,14 @@ export default function Settings() {
         adminName,
       };
 
-      setSettings(normalizedSettings);
-      setSavedSettings(normalizedSettings);
+      setSettings(
+        normalizedSettings
+      );
+
+      setSavedSettings(
+        normalizedSettings
+      );
+
       setShowSavedMessage(true);
     } catch (error) {
       console.error(
@@ -442,11 +547,19 @@ export default function Settings() {
     }
   };
 
+  // ==========================================
+  // Reset Unsaved Changes
+  // ==========================================
+
   const handleReset = () => {
     setSettings(savedSettings);
     setShowSavedMessage(false);
     setSaveError("");
   };
+
+  // ==========================================
+  // Loading
+  // ==========================================
 
   if (loading) {
     return (
@@ -458,12 +571,17 @@ export default function Settings() {
           />
 
           <p className="mt-3 text-sm text-slate-500">
-            Loading system settings...
+            Loading SVM-001
+            settings...
           </p>
         </div>
       </div>
     );
   }
+
+  // ==========================================
+  // Page
+  // ==========================================
 
   return (
     <div className="pb-8">
@@ -475,8 +593,9 @@ export default function Settings() {
           </h1>
 
           <p className="mt-1 text-sm text-slate-500">
-            Configure the vending machine and
-            administrative preferences.
+            Configure SVM-001 and
+            SmartVend administrative
+            preferences.
           </p>
         </div>
 
@@ -495,7 +614,10 @@ export default function Settings() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={!hasChanges || saving}
+            disabled={
+              !hasChanges ||
+              saving
+            }
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {saving ? (
@@ -516,7 +638,10 @@ export default function Settings() {
 
       {/* Page Error */}
       {pageError && (
-        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+        <div
+          role="alert"
+          className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3"
+        >
           <p className="text-sm font-medium text-red-700">
             {pageError}
           </p>
@@ -525,14 +650,17 @@ export default function Settings() {
 
       {/* Save Error */}
       {saveError && (
-        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+        <div
+          role="alert"
+          className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3"
+        >
           <p className="text-sm font-medium text-red-700">
             {saveError}
           </p>
         </div>
       )}
 
-      {/* Saved Message */}
+      {/* Success */}
       {showSavedMessage && (
         <div className="mt-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
           <div className="flex items-center gap-2">
@@ -542,26 +670,44 @@ export default function Settings() {
             />
 
             <p className="text-sm font-medium text-green-700">
-              Settings saved successfully.
+              Settings saved
+              successfully.
             </p>
           </div>
         </div>
       )}
 
       <div className="mt-8 grid gap-6 xl:grid-cols-2">
-        {/* General */}
+        {/* ================================= */}
+        {/* General Settings */}
+        {/* ================================= */}
+
         <SettingsSection
           icon={SettingsIcon}
           title="General Settings"
-          description="Basic information about the vending machine."
+          description="Basic information about SVM-001."
         >
           <SettingField
-            label="Machine Name"
-            description="Name displayed throughout the admin system."
+            label="Machine Code"
+            description="Unique identifier for this vending machine."
           >
             <input
               type="text"
-              value={settings.machineName}
+              value="SVM-001"
+              readOnly
+              className="settings-input cursor-not-allowed bg-slate-50"
+            />
+          </SettingField>
+
+          <SettingField
+            label="Machine Name"
+            description="Name displayed throughout the SmartVend admin system."
+          >
+            <input
+              type="text"
+              value={
+                settings.machineName
+              }
               onChange={(event) =>
                 updateSetting(
                   "machineName",
@@ -575,11 +721,13 @@ export default function Settings() {
 
           <SettingField
             label="Machine Location"
-            description="Physical location of this vending machine."
+            description="Physical location of SVM-001."
           >
             <input
               type="text"
-              value={settings.machineLocation}
+              value={
+                settings.machineLocation
+              }
               onChange={(event) =>
                 updateSetting(
                   "machineLocation",
@@ -593,10 +741,12 @@ export default function Settings() {
 
           <SettingField
             label="Currency"
-            description="Currency used for product prices and balances."
+            description="Currency used for product prices and student balances."
           >
             <select
-              value={settings.currency}
+              value={
+                settings.currency
+              }
               onChange={(event) =>
                 updateSetting(
                   "currency",
@@ -607,17 +757,21 @@ export default function Settings() {
               className="settings-input"
             >
               <option value="PHP">
-                Philippine Peso (PHP)
+                Philippine Peso
+                (PHP)
               </option>
             </select>
           </SettingField>
         </SettingsSection>
 
-        {/* Inventory */}
+        {/* ================================= */}
+        {/* Inventory Settings */}
+        {/* ================================= */}
+
         <SettingsSection
           icon={Package}
           title="Inventory Settings"
-          description="Configure stock monitoring behavior."
+          description="Configure SVM-001 stock monitoring behavior."
         >
           <SettingField
             label="Low Stock Threshold"
@@ -628,7 +782,9 @@ export default function Settings() {
               min="0"
               max="100"
               step="1"
-              value={settings.lowStockThreshold}
+              value={
+                settings.lowStockThreshold
+              }
               onChange={(event) =>
                 updateSetting(
                   "lowStockThreshold",
@@ -648,16 +804,22 @@ export default function Settings() {
             <p className="mt-1 text-sm leading-6 text-blue-700">
               Inventory quantities of{" "}
               <strong>
-                {settings.lowStockThreshold} or fewer
+                {
+                  settings.lowStockThreshold
+                }{" "}
+                or fewer
               </strong>{" "}
-              will be considered low stock.
+              will be considered low
+              stock.
             </p>
           </div>
 
           <ToggleSetting
             title="Low Stock Alerts"
             description="Enable low-stock alert processing for administrators."
-            checked={settings.lowStockAlerts}
+            checked={
+              settings.lowStockAlerts
+            }
             disabled={saving}
             onChange={() =>
               updateSetting(
@@ -668,31 +830,53 @@ export default function Settings() {
           />
         </SettingsSection>
 
-        {/* Payment */}
+        {/* ================================= */}
+        {/* Payment Settings */}
+        {/* ================================= */}
+
         <SettingsSection
           icon={CreditCard}
           title="Payment & Student ID"
-          description="Configure student ID card payment rules."
+          description="Review SmartVend cashless payment methods and student-card rules."
         >
           <SettingField
-            label="Payment Method"
-            description="Primary cashless payment method."
+            label="Payment Methods"
+            description="Cashless payment methods supported by SmartVend."
           >
             <select
-              value={settings.paymentMethod}
+              value={
+                settings.paymentMethod
+              }
               disabled
               className="settings-input cursor-not-allowed bg-slate-50"
             >
-              <option value="Student ID Card">
-                University Student ID Card
+              <option value="Student ID + QR">
+                Student ID Wallet +
+                Direct QR Payment
               </option>
             </select>
           </SettingField>
 
+          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+            <p className="text-sm font-semibold text-blue-800">
+              Dual cashless payment
+            </p>
+
+            <p className="mt-1 text-sm leading-6 text-blue-700">
+              Registered students can
+              pay using their student
+              card wallet. Customers
+              without a registered card
+              can use Direct QR Payment.
+            </p>
+          </div>
+
           <ToggleSetting
             title="Require Active Card"
-            description="Only active student cards can make purchases."
-            checked={settings.requireActiveCard}
+            description="Only active registered student cards can use the student-wallet payment method."
+            checked={
+              settings.requireActiveCard
+            }
             disabled={saving}
             onChange={() =>
               updateSetting(
@@ -704,8 +888,10 @@ export default function Settings() {
 
           <ToggleSetting
             title="Prevent Negative Balance"
-            description="Reject purchases when the student's balance is insufficient."
-            checked={settings.preventNegativeBalance}
+            description="Reject student-wallet purchases when the student's available balance is insufficient."
+            checked={
+              settings.preventNegativeBalance
+            }
             disabled={saving}
             onChange={() =>
               updateSetting(
@@ -728,18 +914,25 @@ export default function Settings() {
                 </p>
 
                 <p className="mt-1 text-sm leading-6 text-amber-700">
-                  Student numbers and electronic card
-                  UIDs are stored separately. Actual
-                  university ID compatibility will be
-                  verified with the RFID/NFC hardware
-                  during hardware integration.
+                  Student numbers and
+                  electronic card UIDs
+                  are stored separately.
+                  Actual university ID
+                  compatibility will be
+                  verified with the
+                  RFID/NFC hardware
+                  during hardware
+                  integration.
                 </p>
               </div>
             </div>
           </div>
         </SettingsSection>
 
+        {/* ================================= */}
         {/* Notifications */}
+        {/* ================================= */}
+
         <SettingsSection
           icon={Bell}
           title="System Notifications"
@@ -748,7 +941,9 @@ export default function Settings() {
           <ToggleSetting
             title="Machine Offline"
             description="Enable alerts when the ESP32-S3 stops sending heartbeat messages."
-            checked={settings.machineOfflineAlerts}
+            checked={
+              settings.machineOfflineAlerts
+            }
             disabled={saving}
             onChange={() =>
               updateSetting(
@@ -775,15 +970,21 @@ export default function Settings() {
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs leading-5 text-slate-500">
-              These preferences are now stored in the
-              database. Automated notification delivery
-              can be implemented later when the alert
-              processing layer is added.
+              These preferences are
+              stored in the database.
+              Automated notification
+              delivery can be
+              implemented when the
+              alert-processing layer is
+              added.
             </p>
           </div>
         </SettingsSection>
 
+        {/* ================================= */}
         {/* Administrator */}
+        {/* ================================= */}
+
         <SettingsSection
           icon={User}
           title="Administrator Account"
@@ -791,11 +992,13 @@ export default function Settings() {
         >
           <SettingField
             label="Administrator Name"
-            description="Name displayed in the admin interface."
+            description="Name displayed in the SmartVend admin interface."
           >
             <input
               type="text"
-              value={settings.adminName}
+              value={
+                settings.adminName
+              }
               onChange={(event) =>
                 updateSetting(
                   "adminName",
@@ -813,7 +1016,9 @@ export default function Settings() {
           >
             <input
               type="email"
-              value={settings.adminEmail}
+              value={
+                settings.adminEmail
+              }
               readOnly
               className="settings-input cursor-not-allowed bg-slate-50"
             />
@@ -821,22 +1026,30 @@ export default function Settings() {
 
           <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
             <p className="text-sm font-semibold text-blue-800">
-              Authentication account
+              Authentication
+              account
             </p>
 
             <p className="mt-1 text-xs leading-5 text-blue-700">
-              Administrator authentication is managed
-              by Supabase Auth. Changing the display
-              name here does not change the login email.
+              Administrator
+              authentication is
+              managed by Supabase
+              Auth. Changing the
+              display name here does
+              not change the login
+              email.
             </p>
           </div>
         </SettingsSection>
 
-        {/* System Security */}
+        {/* ================================= */}
+        {/* Security */}
+        {/* ================================= */}
+
         <SettingsSection
           icon={ShieldCheck}
           title="System & Security"
-          description="Security information for the vending system."
+          description="Security information for SmartVend."
         >
           <SecurityItem
             title="Administrator Authentication"
@@ -857,6 +1070,12 @@ export default function Settings() {
           />
 
           <SecurityItem
+            title="Payment Communication"
+            status="Protected"
+            description="Payment and backend requests use HTTPS/TLS for encrypted communication in transit."
+          />
+
+          <SecurityItem
             title="ESP32-S3 Communication"
             status="Planned"
             description="The physical controller will use authenticated backend communication and will not receive administrator database credentials."
@@ -870,16 +1089,24 @@ export default function Settings() {
               />
 
               <p className="text-xs leading-5 text-red-700">
-                Wi-Fi passwords, private API keys,
-                Supabase service-role keys, and device
-                credentials must never be placed in
-                frontend source code or committed to
-                GitHub.
+                Wi-Fi passwords,
+                private API keys,
+                Supabase service-role
+                keys, payment-provider
+                credentials, and device
+                credentials must never
+                be placed in frontend
+                source code or
+                committed to GitHub.
               </p>
             </div>
           </div>
         </SettingsSection>
       </div>
+
+      {/* ================================= */}
+      {/* Local Settings Styles */}
+      {/* ================================= */}
 
       <style>{`
         .settings-input {
@@ -891,12 +1118,15 @@ export default function Settings() {
           font-size: 0.875rem;
           color: #334155;
           outline: none;
-          transition: border-color 150ms, box-shadow 150ms;
+          transition:
+            border-color 150ms,
+            box-shadow 150ms;
         }
 
         .settings-input:focus {
           border-color: #3b82f6;
-          box-shadow: 0 0 0 4px #dbeafe;
+          box-shadow:
+            0 0 0 4px #dbeafe;
         }
 
         .settings-input:disabled,
@@ -907,6 +1137,10 @@ export default function Settings() {
     </div>
   );
 }
+
+// ==========================================
+// Settings Section
+// ==========================================
 
 function SettingsSection({
   icon: Icon,
@@ -939,6 +1173,10 @@ function SettingsSection({
   );
 }
 
+// ==========================================
+// Setting Field
+// ==========================================
+
 function SettingField({
   label,
   description,
@@ -960,6 +1198,10 @@ function SettingField({
     </div>
   );
 }
+
+// ==========================================
+// Toggle Setting
+// ==========================================
 
 function ToggleSetting({
   title,
@@ -987,7 +1229,9 @@ function ToggleSetting({
         disabled={disabled}
         onClick={onChange}
         className={`relative h-6 w-11 shrink-0 rounded-full transition ${
-          checked ? "bg-blue-600" : "bg-slate-300"
+          checked
+            ? "bg-blue-600"
+            : "bg-slate-300"
         } ${
           disabled
             ? "cursor-not-allowed opacity-60"
@@ -996,13 +1240,19 @@ function ToggleSetting({
       >
         <span
           className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${
-            checked ? "left-6" : "left-1"
+            checked
+              ? "left-6"
+              : "left-1"
           }`}
         />
       </button>
     </div>
   );
 }
+
+// ==========================================
+// Security Item
+// ==========================================
 
 function SecurityItem({
   title,

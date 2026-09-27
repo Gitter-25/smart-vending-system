@@ -206,34 +206,43 @@ export default function Dashboard() {
          */
         const formattedTransactions = (
           recentTransactionsResult.data ?? []
-        ).map((transaction) => ({
-          id: transaction.id,
+        ).map((transaction) => {
+          const isQrGuest =
+            transaction.payment_method === "qr" &&
+            !transaction.students;
 
-          transactionId:
-            transaction.transaction_code,
+          return {
+            id: transaction.id,
 
-          student:
-            transaction.students
-              ?.student_number ?? "Unknown",
+            transactionId:
+              transaction.transaction_code,
 
-          studentName:
-            transaction.students?.full_name ??
-            "Unknown Student",
+            student: isQrGuest
+              ? "QR Guest"
+              : transaction.students
+                  ?.student_number ?? "Unknown",
 
-          product:
-            transaction.product_name,
+            studentName: isQrGuest
+              ? "Direct QR Payment"
+              : transaction.students?.full_name ??
+                "Unknown Student",
 
-          amount: Number(
-            transaction.amount || 0
-          ),
+            product:
+              transaction.product_name,
 
-          method:
-            transaction.payment_method ===
-            "student_id"
-              ? "Student ID"
-              : transaction.payment_method,
+            amount: Number(
+              transaction.amount || 0
+            ),
 
-          status:
+            method:
+              transaction.payment_method ===
+              "student_id"
+                ? "Student ID"
+                : transaction.payment_method === "qr"
+                  ? "Direct QR Payment"
+                  : transaction.payment_method,
+
+            status:
             transaction.status === "success"
               ? "Success"
               : transaction.status === "failed"
@@ -247,8 +256,9 @@ export default function Dashboard() {
                     : transaction.status,
 
           createdAt:
-            transaction.created_at,
-        }));
+          transaction.created_at,
+          };
+        });
 
         setTransactions(
           formattedTransactions
@@ -401,7 +411,7 @@ export default function Dashboard() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                Latest vending machine purchases
+                Latest Student ID and QR payment activity
               </p>
             </div>
 
@@ -517,9 +527,9 @@ export default function Dashboard() {
               </p>
 
               <p className="mt-1 text-sm text-slate-400">
-                Completed vending purchases will
-                appear here.
-              </p>
+              Recent vending transactions will
+              appear here.
+            </p>
             </div>
           )}
         </div>
@@ -528,14 +538,14 @@ export default function Dashboard() {
         <div className="rounded-2xl border border-slate-200 bg-white p-6">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-slate-900">
-                Machine Status
-              </h2>
+            <h2 className="font-semibold text-slate-900">
+              SVM-001 Status
+            </h2>
 
-              <p className="mt-1 text-sm text-slate-500">
-                Current hardware integration
-              </p>
-            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Software and hardware readiness
+            </p>
+          </div>
 
             <WifiOff
               className="text-slate-400"
@@ -550,43 +560,44 @@ export default function Dashboard() {
            * We should not show "online" until the
            * ESP32-S3 heartbeat is actually connected.
            */}
-          <div className="mt-6 rounded-xl bg-slate-50 p-4">
-            <div className="flex items-center gap-2">
-              <div className="h-2.5 w-2.5 rounded-full bg-slate-400" />
+          <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-2">
+            <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
 
-              <p className="font-medium text-slate-700">
-                Hardware Not Connected
-              </p>
-            </div>
-
-            <p className="mt-2 text-sm leading-5 text-slate-500">
-              The web application and database are
-              operational. ESP32-S3 integration will
-              be added during the hardware phase.
+            <p className="font-medium text-amber-800">
+              Hardware Integration Pending
             </p>
           </div>
 
+          <p className="mt-2 text-sm leading-5 text-amber-700">
+            SmartVend software and backend services are
+            operational. Physical ESP32-S3, RFID/NFC,
+            and dispenser integration will be completed
+            during the hardware phase.
+          </p>
+        </div>
+
           <div className="mt-6 space-y-4">
             <StatusRow
-              label="ESP32-S3 Controller"
-              value="Not connected"
-            />
+            label="ESP32-S3 Controller"
+            value="Integration pending"
+          />
 
-            <StatusRow
-              label="ID Card Reader"
-              value="Not connected"
-            />
+          <StatusRow
+            label="RFID / NFC Reader"
+            value="Integration pending"
+          />
 
-            <StatusRow
-              label="Dispenser"
-              value="Not connected"
-            />
+          <StatusRow
+            label="Dispenser"
+            value="Integration pending"
+          />
 
-            <StatusRow
-              label="Database"
-              value="Connected"
-              success
-            />
+          <StatusRow
+            label="Supabase Backend"
+            value="Operational"
+            success
+          />
           </div>
 
           <div className="mt-6 border-t border-slate-100 pt-5">
