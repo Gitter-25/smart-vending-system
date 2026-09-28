@@ -261,7 +261,7 @@ if (
      * Validate amount and currency using Maya's verified response.
      */
     const localAmount = Number(transaction.amount);
-const mayaAmount = Number(mayaPayment.amount);
+    const mayaAmount = Number(mayaPayment.amount);
 
     if (
       !Number.isFinite(localAmount) ||
