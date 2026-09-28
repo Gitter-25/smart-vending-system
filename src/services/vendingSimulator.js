@@ -174,6 +174,139 @@ export async function createSimulatorQrPayment({
 
 /*
  * --------------------------------------------------
+ * CREATE REAL MAYA CHECKOUT
+ * --------------------------------------------------
+ *
+ * Creates a real Maya Sandbox Checkout through the
+ * admin-only vending simulator gateway.
+ *
+ * No Maya API key or vending device secret is exposed
+ * to the browser.
+ */
+export async function createMayaCheckout({
+  slotCode,
+}) {
+  if (!slotCode?.trim()) {
+    throw new Error("Slot code is required.");
+  }
+
+  const accessToken = await getAccessToken();
+
+  /*
+   * UUID is 36 characters and satisfies Maya's
+   * requestReferenceNumber limit.
+   */
+  const requestId = crypto.randomUUID();
+
+  const { data, error } =
+    await supabase.functions.invoke(
+      "vending-simulator-qr",
+      {
+        body: {
+          action: "create-checkout",
+          machine_code: MACHINE_CODE,
+          slot_code: slotCode.trim(),
+          request_id: requestId,
+        },
+
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+  if (error) {
+    throw new Error(
+      getFunctionError(
+        data,
+        error,
+        "Unable to create Maya Checkout."
+      )
+    );
+  }
+
+  if (!data?.success) {
+    throw new Error(
+      data?.error ||
+        "Unable to create Maya Checkout."
+    );
+  }
+
+  if (!data?.transaction_id) {
+    throw new Error(
+      "Maya Checkout did not return a transaction ID."
+    );
+  }
+
+  if (!data?.payment?.redirect_url) {
+    throw new Error(
+      "Maya Checkout did not return a payment URL."
+    );
+  }
+
+  return data;
+}
+
+/*
+ * --------------------------------------------------
+ * VERIFY REAL MAYA CHECKOUT PAYMENT
+ * --------------------------------------------------
+ *
+ * The browser does NOT decide whether payment
+ * succeeded.
+ *
+ * SmartVend's backend contacts Maya directly and
+ * verifies the provider payment status.
+ */
+export async function checkMayaCheckoutStatus({
+  transactionId,
+}) {
+  if (!transactionId?.trim()) {
+    throw new Error(
+      "Transaction ID is required."
+    );
+  }
+
+  const accessToken = await getAccessToken();
+
+  const { data, error } =
+    await supabase.functions.invoke(
+      "vending-simulator-qr",
+      {
+        body: {
+          action: "checkout-status",
+          transaction_id:
+            transactionId.trim(),
+        },
+
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+  if (error) {
+    throw new Error(
+      getFunctionError(
+        data,
+        error,
+        "Unable to verify Maya payment."
+      )
+    );
+  }
+
+  if (!data?.success) {
+    throw new Error(
+      data?.error ||
+        "Unable to verify Maya payment."
+    );
+  }
+
+  return data;
+}
+
+/*
+ * --------------------------------------------------
  * CREATE SIMULATED SANDBOX QR
  * --------------------------------------------------
  *

@@ -16,13 +16,15 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "../../lib/supabase";
 import {
+  checkMayaCheckoutStatus,
   checkSimulatorQrStatus,
   completeSimulatorDispense,
+  createMayaCheckout,
   createSimulatedQrPayment,
   createSimulatorQrPayment,
   simulateCardPurchase,
   simulateQrPaymentSuccess,
-   simulateQrRefundSuccess,
+  simulateQrRefundSuccess,
   startSimulatorDispense,
 } from "../../services/vendingSimulator";
 
@@ -47,6 +49,24 @@ export default function VendingSimulator() {
 
   const [paymentError, setPaymentError] =
     useState("");
+
+    /*
+ * Maya Checkout states
+ */
+const [creatingCheckout, setCreatingCheckout] =
+  useState(false);
+
+const [mayaCheckout, setMayaCheckout] =
+  useState(null);
+
+const [checkingCheckout, setCheckingCheckout] =
+  useState(false);
+
+const [checkoutError, setCheckoutError] =
+  useState("");
+
+const [checkoutStatusMessage, setCheckoutStatusMessage] =
+  useState("");
 
   /*
    * QR payment states
@@ -256,6 +276,11 @@ const [qrRefundError, setQrRefundError] =
     setShowCardInput(false);
     setProcessingPayment(false);
     setPaymentError("");
+    setCreatingCheckout(false);
+    setMayaCheckout(null);
+    setCheckingCheckout(false);
+    setCheckoutError("");
+    setCheckoutStatusMessage("");
 
     setCreatingQr(false);
     setCreatingSimulatedQr(false);
@@ -355,6 +380,186 @@ const [qrRefundError, setQrRefundError] =
       setProcessingPayment(false);
     }
   };
+
+  /*
+ * ------------------------------------------------
+ * REAL MAYA CHECKOUT
+ * ------------------------------------------------
+ */
+const handleCreateMayaCheckout = async () => {
+  if (!selectedProduct) {
+    return;
+  }
+
+  setCreatingCheckout(true);
+  setCheckoutError("");
+  setCheckoutStatusMessage("");
+  setPaymentError("");
+
+  try {
+    const result = await createMayaCheckout({
+      slotCode: selectedProduct.slot,
+    });
+
+    setMayaCheckout(result);
+    setPaymentMethod("maya_checkout");
+
+    /*
+     * Checkout creation reserves one item in the
+     * backend, so mirror the reservation locally.
+     */
+    setProducts((currentProducts) =>
+      currentProducts.map((product) =>
+        product.id === selectedProduct.id
+          ? {
+              ...product,
+              stock: Math.max(
+                product.stock - 1,
+                0
+              ),
+            }
+          : product
+      )
+    );
+
+    setCheckoutStatusMessage(
+      "Maya Checkout created. Complete payment on the Maya-hosted payment page."
+    );
+
+    /*
+     * Open Maya's hosted sandbox checkout.
+     *
+     * SmartVend does not collect the customer's
+     * card details.
+     */
+    const redirectUrl =
+      result?.payment?.redirect_url;
+
+    if (redirectUrl) {
+      window.open(
+        redirectUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Unable to create Maya Checkout:",
+      error
+    );
+
+    setCheckoutError(
+      error instanceof Error
+        ? error.message
+        : "Unable to create Maya Checkout."
+    );
+
+    /*
+     * If creation was explicitly rejected, the
+     * backend may have released the reservation.
+     * Reload authoritative inventory.
+     */
+    await loadProducts();
+  } finally {
+    setCreatingCheckout(false);
+  }
+};
+
+const handleOpenMayaCheckout = () => {
+  const redirectUrl =
+    mayaCheckout?.payment?.redirect_url;
+
+  if (!redirectUrl) {
+    setCheckoutError(
+      "Maya Checkout payment URL is unavailable."
+    );
+    return;
+  }
+
+  window.open(
+    redirectUrl,
+    "_blank",
+    "noopener,noreferrer"
+  );
+};
+
+const handleVerifyMayaCheckout = async () => {
+  const transactionId =
+    mayaCheckout?.transaction_id;
+
+  if (!transactionId) {
+    setCheckoutError(
+      "Maya Checkout transaction ID is missing."
+    );
+    return;
+  }
+
+  setCheckingCheckout(true);
+  setCheckoutError("");
+  setCheckoutStatusMessage("");
+
+  try {
+    const result =
+      await checkMayaCheckoutStatus({
+        transactionId,
+      });
+
+    if (
+      result.provider_verified === true &&
+      result.paid === true
+    ) {
+      const confirmation =
+        Array.isArray(result.confirmation)
+          ? result.confirmation[0]
+          : result.confirmation;
+
+      setPurchaseResult({
+        id: result.transaction_id,
+        transaction_id:
+          result.transaction_id,
+        transaction_code:
+          result.transaction_code,
+        payment_status:
+          confirmation?.payment_status ??
+          "paid",
+        dispense_status:
+          confirmation?.dispense_status ??
+          "not_started",
+        maya_status:
+          result.maya_status,
+        provider_verified: true,
+        simulated: false,
+      });
+
+      setPaymentMethod("maya_checkout");
+
+      setCheckoutStatusMessage(
+        "Payment verified directly with Maya. Ready to dispense."
+      );
+
+      return;
+    }
+
+    setCheckoutStatusMessage(
+      `Payment has not been completed yet. Maya status: ${
+        result.maya_status ?? "UNKNOWN"
+      }`
+    );
+  } catch (error) {
+    console.error(
+      "Unable to verify Maya Checkout:",
+      error
+    );
+
+    setCheckoutError(
+      error instanceof Error
+        ? error.message
+        : "Unable to verify Maya payment."
+    );
+  } finally {
+    setCheckingCheckout(false);
+  }
+};
 
   /*
    * ------------------------------------------------
@@ -827,6 +1032,8 @@ const [qrRefundError, setQrRefundError] =
 
   const transactionBusy =
   processingPayment ||
+  creatingCheckout ||
+  checkingCheckout ||
   creatingQr ||
   creatingSimulatedQr ||
   checkingQr ||
@@ -1219,8 +1426,171 @@ const [qrRefundError, setQrRefundError] =
                     />
                   )}
 
+                  {/* Maya Checkout */}
+                  <button
+                    type="button"
+                    disabled={
+                      !selectedProduct ||
+                      transactionBusy ||
+                      paymentCompleted ||
+                      Boolean(mayaCheckout) ||
+                      Boolean(qrPayment)
+                    }
+                    onClick={handleCreateMayaCheckout}
+                    className="flex w-full items-center gap-3 rounded-xl border border-slate-200 p-4 text-left text-slate-700 transition hover:border-emerald-500 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    {creatingCheckout ? (
+                      <Loader2
+                        size={22}
+                        className="animate-spin"
+                      />
+                    ) : (
+                      <CreditCard size={22} />
+                    )}
+
+                    <div>
+                      <p className="font-semibold">
+                        {creatingCheckout
+                          ? "Creating Maya Checkout..."
+                          : "Maya Checkout"}
+                      </p>
+
+                      <p className="text-xs">
+                        Real Maya Sandbox API payment
+                      </p>
+                    </div>
+                  </button>
+
+                  {checkoutError && (
+                    <ErrorMessage
+                      title="Maya Checkout Error"
+                      message={checkoutError}
+                    />
+                  )}
+
+                  {mayaCheckout && !purchaseResult && (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                      <div className="flex items-start gap-3">
+                        <CreditCard
+                          size={22}
+                          className="mt-0.5 shrink-0 text-emerald-600"
+                        />
+
+                        <div>
+                          <p className="font-semibold text-emerald-950">
+                            Maya Sandbox Checkout
+                          </p>
+
+                          <p className="mt-1 text-xs text-emerald-700">
+                            This checkout was created by the Maya
+                            Sandbox API. Complete the payment on
+                            Maya&apos;s hosted payment page.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-xl bg-white p-4">
+                        <div className="flex justify-between gap-4 text-sm">
+                          <span className="text-slate-500">
+                            Product
+                          </span>
+
+                          <span className="font-semibold text-slate-900">
+                            {mayaCheckout.product_name ??
+                              selectedProduct?.name}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 flex justify-between gap-4 text-sm">
+                          <span className="text-slate-500">
+                            Amount
+                          </span>
+
+                          <span className="font-semibold text-slate-900">
+                            ₱
+                            {Number(
+                              mayaCheckout.amount ??
+                                selectedProduct?.price ??
+                                0
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 flex justify-between gap-4 text-sm">
+                          <span className="text-slate-500">
+                            Provider
+                          </span>
+
+                          <span className="font-semibold text-slate-900">
+                            Maya
+                          </span>
+                        </div>
+
+                        <div className="mt-2 flex justify-between gap-4 text-sm">
+                          <span className="text-slate-500">
+                            Status
+                          </span>
+
+                          <span className="font-semibold text-amber-600">
+                            Awaiting Payment
+                          </span>
+                        </div>
+                      </div>
+
+                      {checkoutStatusMessage && (
+                        <div className="mt-4 rounded-xl bg-white/80 p-3 text-center text-xs text-emerald-800">
+                          {checkoutStatusMessage}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleOpenMayaCheckout}
+                        disabled={checkingCheckout}
+                        className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                      >
+                        <CreditCard size={17} />
+                        Open Maya Checkout
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleVerifyMayaCheckout}
+                        disabled={checkingCheckout}
+                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-white px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {checkingCheckout ? (
+                          <Loader2
+                            size={17}
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <RefreshCw size={17} />
+                        )}
+
+                        {checkingCheckout
+                          ? "Verifying with Maya..."
+                          : "Verify Maya Payment"}
+                      </button>
+
+                      <p className="mt-3 text-center text-xs text-slate-500">
+                        SmartVend verifies the payment directly with
+                        Maya before dispensing.
+                      </p>
+                    </div>
+                  )}
+
+                  {purchaseResult &&
+                    paymentMethod === "maya_checkout" && (
+                      <SuccessMessage
+                        title="Maya Payment Verified"
+                        message="Maya confirmed PAYMENT_SUCCESS. SmartVend has authorized this transaction for dispensing."
+                      />
+                    )}
+
                 {/* Direct QR */}
                 <button
+                
                   type="button"
                   disabled={
                     !selectedProduct ||
@@ -1229,8 +1599,8 @@ const [qrRefundError, setQrRefundError] =
                     Boolean(qrPayment)
                   }
                   onClick={handleCreateQr}
-                  className="flex w-full items-center gap-3 rounded-xl border border-slate-200 p-4 text-left text-slate-700 transition hover:border-blue-500 hover:bg-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                >
+                  className="hidden"
+                  >
                   {creatingQr ? (
                     <Loader2
                       size={22}
@@ -1563,24 +1933,32 @@ const [qrRefundError, setQrRefundError] =
               number="2"
               title="Payment"
               description={
-                purchaseResult
-                  ? paymentMethod === "qr"
+              purchaseResult
+                ? paymentMethod === "maya_checkout"
+                  ? "Maya payment verified"
+                  : paymentMethod === "qr"
                     ? purchaseResult.simulated
                       ? "Sandbox payment simulated"
                       : "Maya QR paid"
                     : "Student wallet paid"
+                : mayaCheckout
+                  ? checkingCheckout
+                    ? "Verifying with Maya"
+                    : "Awaiting Maya payment"
                   : qrPayment
                     ? simulatedQr
                       ? "Awaiting simulation"
                       : "Awaiting Maya"
                     : processingPayment ||
+                        creatingCheckout ||
+                        checkingCheckout ||
                         creatingQr ||
                         creatingSimulatedQr ||
                         checkingQr ||
                         simulatingQrPayment
                       ? "Processing"
-                      : "Card or QR"
-              }
+                      : "Card or Maya"
+            }
               active={
                 Boolean(qrPayment) &&
                 !purchaseResult
@@ -1876,17 +2254,11 @@ const [qrRefundError, setQrRefundError] =
           </p>
 
           <p className="mt-1 text-sm text-amber-700">
-            This interface represents SVM-001.
-            Student card taps and physical motor
-            operation are simulated until the
-            ESP32-S3 hardware is connected. Real
-            Maya QR generation and payment-status
-            verification use the Maya sandbox
-            integration. When the Maya sandbox QR
-            service is unavailable, a separately
-            labeled SmartVend payment simulation
-            may be used for development and
-            presentation testing.
+            This interface represents SVM-001. Student card taps and physical
+            motor operation are simulated until the ESP32-S3 hardware is connected.
+            Maya Checkout payment creation and payment-status verification use the
+            real Maya Sandbox API. The separately labeled SmartVend QR simulation
+            is retained only for development and recovery testing.
           </p>
         </div>
       </div>

@@ -13,24 +13,114 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-function formatPaymentMethod(method) {
-  if (!method) {
-    return "Unknown";
+/*
+ * --------------------------------------------------
+ * PAYMENT HELPERS
+ * --------------------------------------------------
+ */
+
+function isMayaCheckoutTransaction(transaction) {
+  if (!transaction) {
+    return false;
   }
 
-  const labels = {
-    student_id: "Student ID",
-    qr: "Direct QR Payment",
-  };
+  if (transaction.payment_method !== "qr") {
+    return false;
+  }
+
+  const paymentEvent = String(
+    transaction.payment_last_event ?? ""
+  ).toLowerCase();
+
+  return Boolean(
+    transaction.payment_checkout_id ||
+      paymentEvent === "checkout_created" ||
+      paymentEvent === "checkout_payment_verified" ||
+      paymentEvent.includes("checkout")
+  );
+}
+
+function isQrSimulationTransaction(transaction) {
+  if (!transaction) {
+    return false;
+  }
+
+  if (transaction.payment_method !== "qr") {
+    return false;
+  }
+
+  const paymentEvent = String(
+    transaction.payment_last_event ?? ""
+  ).toLowerCase();
 
   return (
-    labels[method] ||
-    method
-      .replaceAll("_", " ")
-      .replace(/\b\w/g, (letter) =>
-        letter.toUpperCase()
-      )
+    paymentEvent.includes("simulat") ||
+    paymentEvent.includes("sandbox_simulation")
   );
+}
+
+function getPaymentDisplay(transaction) {
+  if (!transaction) {
+    return {
+      method: "Unknown",
+      customerName: "Unknown",
+      customerReference: "Unknown",
+    };
+  }
+
+  if (transaction.payment_method === "student_id") {
+    return {
+      method: "Student ID Card",
+      customerName:
+        transaction.students?.full_name ??
+        "Unknown Student",
+      customerReference:
+        transaction.students?.student_number ??
+        "Unknown",
+    };
+  }
+
+  if (isMayaCheckoutTransaction(transaction)) {
+    return {
+      method: "Maya Checkout",
+      customerName: "Maya Guest",
+      customerReference: "Maya Checkout",
+    };
+  }
+
+  if (isQrSimulationTransaction(transaction)) {
+    return {
+      method: "Sandbox QR Simulation",
+      customerName: "Sandbox Guest",
+      customerReference: "QR Simulation",
+    };
+  }
+
+  if (transaction.payment_method === "qr") {
+    return {
+      method: "Direct QR Payment",
+      customerName: "QR Guest",
+      customerReference: "Direct QR Payment",
+    };
+  }
+
+  const method = transaction.payment_method
+    ? transaction.payment_method
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (letter) =>
+          letter.toUpperCase()
+        )
+    : "Unknown";
+
+  return {
+    method,
+    customerName:
+      transaction.students?.full_name ??
+      "Guest Customer",
+    customerReference:
+      transaction.students?.student_number ??
+      method,
+  };
 }
 
 function formatStatus(status) {
@@ -41,6 +131,40 @@ function formatStatus(status) {
   return (
     status.charAt(0).toUpperCase() +
     status.slice(1).toLowerCase()
+  );
+}
+
+function formatPaymentStatus(status) {
+  if (!status) {
+    return "—";
+  }
+
+  return String(status)
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) =>
+      letter.toUpperCase()
+    );
+}
+
+function formatDispenseStatus(status) {
+  if (!status) {
+    return "—";
+  }
+
+  const labels = {
+    not_started: "Not Started",
+    dispensing: "Dispensing",
+    dispensed: "Dispensed",
+    failed: "Failed",
+  };
+
+  return (
+    labels[status] ||
+    String(status)
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (letter) =>
+        letter.toUpperCase()
+      )
   );
 }
 
@@ -76,12 +200,25 @@ function formatTransactionDate(dateValue) {
   };
 }
 
-export default function Transactions() {
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState("");
+/*
+ * --------------------------------------------------
+ * TRANSACTIONS PAGE
+ * --------------------------------------------------
+ */
 
-  const [search, setSearch] = useState("");
+export default function Transactions() {
+  const [transactions, setTransactions] =
+    useState([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [pageError, setPageError] =
+    useState("");
+
+  const [search, setSearch] =
+    useState("");
+
   const [statusFilter, setStatusFilter] =
     useState("All");
 
@@ -108,6 +245,14 @@ export default function Transactions() {
           product_name,
           amount,
           payment_method,
+          payment_provider,
+          payment_reference,
+          payment_status,
+          payment_checkout_id,
+          payment_expires_at,
+          payment_last_event,
+          payment_last_event_at,
+          dispense_status,
           status,
           failure_reason,
           created_at,
@@ -151,60 +296,65 @@ export default function Transactions() {
       }
 
       const formattedTransactions = (
-  data ?? []
-).map((transaction) => {
-  const dateInfo = formatTransactionDate(
-    transaction.created_at
-  );
+        data ?? []
+      ).map((transaction) => {
+        const dateInfo =
+          formatTransactionDate(
+            transaction.created_at
+          );
 
-  const completedDateInfo =
-    formatTransactionDate(
-      transaction.completed_at
-    );
+        const completedDateInfo =
+          formatTransactionDate(
+            transaction.completed_at
+          );
 
-  const isQrGuest =
-    transaction.payment_method === "qr" &&
-    !transaction.student_id;
+        const paymentDisplay =
+          getPaymentDisplay(transaction);
 
-  return {
+        const mayaCheckout =
+          isMayaCheckoutTransaction(
+            transaction
+          );
+
+        const qrSimulation =
+          isQrSimulationTransaction(
+            transaction
+          );
+
+        return {
           id: transaction.id,
 
           transactionId:
             transaction.transaction_code,
 
-          studentId: transaction.student_id,
+          studentId:
+            transaction.student_id,
 
           studentNumber:
-  transaction.students?.student_number ??
-  (isQrGuest
-    ? "Direct QR Payment"
-    : "Unknown"),
+            paymentDisplay.customerReference,
 
-studentName:
-  transaction.students?.full_name ??
-  (isQrGuest
-    ? "QR Guest"
-    : "Unknown Student"),
+          studentName:
+            paymentDisplay.customerName,
 
           cardUid:
-            transaction.student_cards?.card_uid ??
-            "—",
+            transaction.student_cards
+              ?.card_uid ?? "—",
 
           product:
             transaction.product_name ??
             "Unknown Product",
 
           slot:
-            transaction.vending_slots?.slot_code ??
-            "—",
+            transaction.vending_slots
+              ?.slot_code ?? "—",
 
           motorNumber:
             transaction.vending_slots
               ?.motor_number ?? null,
 
           machineCode:
-            transaction.machines?.machine_code ??
-            "—",
+            transaction.machines
+              ?.machine_code ?? "—",
 
           machineName:
             transaction.machines?.name ??
@@ -214,9 +364,49 @@ studentName:
             transaction.amount ?? 0
           ),
 
-          paymentMethod: formatPaymentMethod(
-            transaction.payment_method
-          ),
+          paymentMethod:
+            paymentDisplay.method,
+
+          rawPaymentMethod:
+            transaction.payment_method,
+
+          paymentProvider:
+            transaction.payment_provider ??
+            "—",
+
+          paymentReference:
+            transaction.payment_reference ??
+            "—",
+
+          paymentStatus:
+            formatPaymentStatus(
+              transaction.payment_status
+            ),
+
+          paymentCheckoutId:
+            transaction.payment_checkout_id ??
+            "",
+
+          paymentExpiresAt:
+            transaction.payment_expires_at,
+
+          paymentLastEvent:
+            transaction.payment_last_event ??
+            "",
+
+          paymentLastEventAt:
+            transaction.payment_last_event_at,
+
+          dispenseStatus:
+            formatDispenseStatus(
+              transaction.dispense_status
+            ),
+
+          isMayaCheckout:
+            mayaCheckout,
+
+          isQrSimulation:
+            qrSimulation,
 
           status: formatStatus(
             transaction.status
@@ -238,61 +428,83 @@ studentName:
               ? completedDateInfo.time
               : "—",
 
-          createdAt: transaction.created_at,
+          createdAt:
+            transaction.created_at,
+
           completedAt:
             transaction.completed_at,
         };
       });
 
-      setTransactions(formattedTransactions);
+      setTransactions(
+        formattedTransactions
+      );
+
       setLoading(false);
     };
 
     loadTransactions();
   }, []);
 
-  const filteredTransactions = useMemo(() => {
-    const searchValue = search
-      .trim()
-      .toLowerCase();
+  /*
+   * ------------------------------------------------
+   * SEARCH + FILTER
+   * ------------------------------------------------
+   */
 
-    return transactions.filter(
-      (transaction) => {
-        const matchesSearch =
-          transaction.transactionId
-            .toLowerCase()
-            .includes(searchValue) ||
-          transaction.studentNumber
-            .toLowerCase()
-            .includes(searchValue) ||
-          transaction.studentName
-            .toLowerCase()
-            .includes(searchValue) ||
-          transaction.product
-            .toLowerCase()
-            .includes(searchValue) ||
-          transaction.cardUid
-            .toLowerCase()
-            .includes(searchValue) ||
-          transaction.machineCode
-            .toLowerCase()
-            .includes(searchValue);
+  const filteredTransactions =
+    useMemo(() => {
+      const searchValue = search
+        .trim()
+        .toLowerCase();
 
-        const matchesStatus =
-          statusFilter === "All" ||
-          transaction.status ===
-            statusFilter;
+      return transactions.filter(
+        (transaction) => {
+          const matchesSearch =
+            transaction.transactionId
+              .toLowerCase()
+              .includes(searchValue) ||
+            transaction.studentNumber
+              .toLowerCase()
+              .includes(searchValue) ||
+            transaction.studentName
+              .toLowerCase()
+              .includes(searchValue) ||
+            transaction.product
+              .toLowerCase()
+              .includes(searchValue) ||
+            transaction.cardUid
+              .toLowerCase()
+              .includes(searchValue) ||
+            transaction.machineCode
+              .toLowerCase()
+              .includes(searchValue) ||
+            transaction.paymentMethod
+              .toLowerCase()
+              .includes(searchValue);
 
-        return (
-          matchesSearch && matchesStatus
-        );
-      }
-    );
-  }, [
-    transactions,
-    search,
-    statusFilter,
-  ]);
+          const matchesStatus =
+            statusFilter === "All" ||
+            transaction.status ===
+              statusFilter;
+
+          return (
+            matchesSearch &&
+            matchesStatus
+          );
+        }
+      );
+    }, [
+      transactions,
+      search,
+      statusFilter,
+    ]);
+
+  /*
+   * ------------------------------------------------
+   * STATISTICS
+   * ------------------------------------------------
+   */
 
   const successfulTransactions =
     transactions.filter(
@@ -313,6 +525,12 @@ studentName:
       0
     );
 
+  /*
+   * ------------------------------------------------
+   * LOADING
+   * ------------------------------------------------
+   */
+
   if (loading) {
     return (
       <div className="flex min-h-[300px] items-center justify-center">
@@ -330,6 +548,12 @@ studentName:
     );
   }
 
+  /*
+   * ------------------------------------------------
+   * PAGE
+   * ------------------------------------------------
+   */
+
   return (
     <div>
       {/* Page Heading */}
@@ -339,8 +563,9 @@ studentName:
         </h1>
 
         <p className="mt-1 text-sm text-slate-500">
-        Monitor SVM-001 Student ID and Direct QR payment transactions.
-      </p>
+          Monitor SVM-001 Student ID and Maya
+          payment transactions.
+        </p>
       </div>
 
       {/* Page Error */}
@@ -373,7 +598,9 @@ studentName:
 
         <TransactionStatCard
           title="Failed"
-          value={failedTransactions.length}
+          value={
+            failedTransactions.length
+          }
           description="Unsuccessful purchases"
           icon={XCircle}
         />
@@ -401,9 +628,11 @@ studentName:
               type="text"
               value={search}
               onChange={(event) =>
-                setSearch(event.target.value)
+                setSearch(
+                  event.target.value
+                )
               }
-              placeholder="Search transaction, student, or product..."
+              placeholder="Search transaction, student, payment, or product..."
               className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
             />
           </div>
@@ -457,7 +686,7 @@ studentName:
                 </th>
 
                 <th className="px-6 py-3 font-medium">
-                  Student
+                  Customer
                 </th>
 
                 <th className="px-6 py-3 font-medium">
@@ -504,10 +733,12 @@ studentName:
                       </p>
                     </td>
 
-                    {/* Student */}
+                    {/* Customer */}
                     <td className="px-6 py-4">
                       <p className="text-sm font-medium text-slate-700">
-                        {transaction.studentName}
+                        {
+                          transaction.studentName
+                        }
                       </p>
 
                       <p className="mt-1 text-xs text-slate-400">
@@ -520,11 +751,14 @@ studentName:
                     {/* Product */}
                     <td className="px-6 py-4">
                       <p className="text-sm font-medium text-slate-700">
-                        {transaction.product}
+                        {
+                          transaction.product
+                        }
                       </p>
 
                       <p className="mt-1 text-xs text-slate-400">
-                        Slot {transaction.slot}
+                        Slot{" "}
+                        {transaction.slot}
                       </p>
                     </td>
 
@@ -603,8 +837,9 @@ studentName:
         <div className="border-t border-slate-200 px-6 py-4">
           <p className="text-sm text-slate-500">
             Showing{" "}
-            {filteredTransactions.length} of{" "}
-            {transactions.length} transactions
+            {filteredTransactions.length}{" "}
+            of {transactions.length}{" "}
+            transactions
           </p>
         </div>
       </div>
@@ -630,7 +865,9 @@ studentName:
               <button
                 type="button"
                 onClick={() =>
-                  setSelectedTransaction(null)
+                  setSelectedTransaction(
+                    null
+                  )
                 }
                 className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
                 aria-label="Close"
@@ -665,41 +902,45 @@ studentName:
 
               <div className="divide-y divide-slate-100">
                 {selectedTransaction.studentId ? (
-              <>
-                <DetailRow
-                  label="Student"
-                  value={
-                    selectedTransaction.studentName
-                  }
-                />
+                  <>
+                    <DetailRow
+                      label="Student"
+                      value={
+                        selectedTransaction.studentName
+                      }
+                    />
 
-                <DetailRow
-                  label="Student Number"
-                  value={
-                    selectedTransaction.studentNumber
-                  }
-                />
+                    <DetailRow
+                      label="Student Number"
+                      value={
+                        selectedTransaction.studentNumber
+                      }
+                    />
 
-                <DetailRow
-                  label="Card UID"
-                  value={
-                    selectedTransaction.cardUid
-                  }
-                />
-              </>
-            ) : (
-                          <>
-                <DetailRow
-                  label="Customer"
-                  value="QR Guest"
-                />
+                    <DetailRow
+                      label="Card UID"
+                      value={
+                        selectedTransaction.cardUid
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <DetailRow
+                      label="Customer"
+                      value={
+                        selectedTransaction.studentName
+                      }
+                    />
 
-                <DetailRow
-                  label="Payment Type"
-                  value="Direct QR Payment"
-                />
-              </>
-            )}
+                    <DetailRow
+                      label="Payment Type"
+                      value={
+                        selectedTransaction.paymentMethod
+                      }
+                    />
+                  </>
+                )}
 
                 <DetailRow
                   label="Product"
@@ -746,6 +987,41 @@ studentName:
                 />
 
                 <DetailRow
+                  label="Payment Provider"
+                  value={
+                    selectedTransaction.paymentProvider ===
+                    "maya"
+                      ? "Maya"
+                      : selectedTransaction.paymentProvider
+                  }
+                />
+
+                <DetailRow
+                  label="Payment Status"
+                  value={
+                    selectedTransaction.paymentStatus
+                  }
+                />
+
+                <DetailRow
+                  label="Dispense Status"
+                  value={
+                    selectedTransaction.dispenseStatus
+                  }
+                />
+
+                {selectedTransaction.isMayaCheckout &&
+                  selectedTransaction.paymentReference !==
+                    "—" && (
+                    <DetailRow
+                      label="Maya Payment ID"
+                      value={
+                        selectedTransaction.paymentReference
+                      }
+                    />
+                  )}
+
+                <DetailRow
                   label="Created Date"
                   value={
                     selectedTransaction.date
@@ -790,7 +1066,9 @@ studentName:
               <button
                 type="button"
                 onClick={() =>
-                  setSelectedTransaction(null)
+                  setSelectedTransaction(
+                    null
+                  )
                 }
                 className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
               >
@@ -803,6 +1081,12 @@ studentName:
     </div>
   );
 }
+
+/*
+ * --------------------------------------------------
+ * STAT CARD
+ * --------------------------------------------------
+ */
 
 function TransactionStatCard({
   title,
@@ -835,7 +1119,15 @@ function TransactionStatCard({
   );
 }
 
-function TransactionStatusBadge({ status }) {
+/*
+ * --------------------------------------------------
+ * STATUS BADGE
+ * --------------------------------------------------
+ */
+
+function TransactionStatusBadge({
+  status,
+}) {
   const config = {
     Success: {
       className:
@@ -844,7 +1136,8 @@ function TransactionStatusBadge({ status }) {
     },
 
     Failed: {
-      className: "bg-red-50 text-red-700",
+      className:
+        "bg-red-50 text-red-700",
       icon: XCircle,
     },
 
@@ -876,6 +1169,12 @@ function TransactionStatusBadge({ status }) {
   );
 }
 
+/*
+ * --------------------------------------------------
+ * DETAIL ROW
+ * --------------------------------------------------
+ */
+
 function DetailRow({
   label,
   value,
@@ -888,7 +1187,7 @@ function DetailRow({
       </span>
 
       <span
-        className={`max-w-[65%] text-right text-sm font-medium ${
+        className={`max-w-[65%] break-all text-right text-sm font-medium ${
           danger
             ? "text-red-600"
             : "text-slate-800"

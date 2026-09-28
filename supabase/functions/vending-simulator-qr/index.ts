@@ -237,6 +237,189 @@ Deno.serve(async (req: Request) => {
         400,
       );
     }
+    /*
+ * ==================================================
+ * CREATE REAL MAYA CHECKOUT
+ * ==================================================
+ *
+ * Admin-only proxy for the real Maya Sandbox
+ * Checkout integration.
+ *
+ * Browser:
+ *   Admin JWT
+ *      ↓
+ * vending-simulator-qr
+ *      ↓ server-side device secret
+ * vending-checkout-create
+ *      ↓
+ * Maya Checkout API
+ */
+
+if (action === "create-checkout") {
+  if (
+    !machine_code ||
+    !slot_code ||
+    !request_id
+  ) {
+    return jsonResponse(
+      {
+        success: false,
+        error:
+          "machine_code, slot_code, and request_id are required",
+      },
+      400,
+    );
+  }
+
+  if (
+    String(machine_code).trim() !==
+    "SVM-001"
+  ) {
+    return jsonResponse(
+      {
+        success: false,
+        error: "Invalid simulator machine",
+      },
+      400,
+    );
+  }
+
+  const normalizedRequestId =
+    String(request_id).trim();
+
+  if (
+    !normalizedRequestId ||
+    normalizedRequestId.length > 36
+  ) {
+    return jsonResponse(
+      {
+        success: false,
+        error:
+          "request_id must contain 1 to 36 characters",
+      },
+      400,
+    );
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/functions/v1/vending-checkout-create`,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+
+        "x-device-secret":
+          deviceSecret,
+      },
+
+      body: JSON.stringify({
+        machine_code: "SVM-001",
+
+        slot_code:
+          String(slot_code).trim(),
+
+        request_id:
+          normalizedRequestId,
+      }),
+    },
+  );
+
+  let data: Record<string, unknown>;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {
+      success: false,
+      error:
+        "Invalid response from Maya Checkout creation service",
+    };
+  }
+
+  return jsonResponse(
+    {
+      ...data,
+
+      simulator: true,
+
+      payment_flow:
+        "maya_checkout",
+    },
+    response.status,
+  );
+}
+
+/*
+ * ==================================================
+ * VERIFY REAL MAYA CHECKOUT PAYMENT
+ * ==================================================
+ *
+ * SmartVend does not trust the browser or the
+ * Maya success page.
+ *
+ * This calls vending-checkout-status, which
+ * independently retrieves the payment from Maya
+ * using the server-side MAYA_SECRET_API_KEY.
+ */
+
+if (action === "checkout-status") {
+  if (!transaction_id) {
+    return jsonResponse(
+      {
+        success: false,
+        error:
+          "transaction_id is required",
+      },
+      400,
+    );
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/functions/v1/vending-checkout-status`,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+
+        "x-device-secret":
+          deviceSecret,
+      },
+
+      body: JSON.stringify({
+        transaction_id:
+          String(
+            transaction_id,
+          ).trim(),
+      }),
+    },
+  );
+
+  let data: Record<string, unknown>;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {
+      success: false,
+      error:
+        "Invalid response from Maya Checkout verification service",
+    };
+  }
+
+  return jsonResponse(
+    {
+      ...data,
+
+      simulator: true,
+
+      payment_flow:
+        "maya_checkout",
+    },
+    response.status,
+  );
+}
 
     /*
      * ==================================================
