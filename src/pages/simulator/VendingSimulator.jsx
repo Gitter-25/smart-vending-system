@@ -561,6 +561,122 @@ const handleVerifyMayaCheckout = async () => {
   }
 };
 
+/*
+ * ------------------------------------------------
+ * AUTOMATIC MAYA PAYMENT LISTENER
+ * ------------------------------------------------
+ *
+ * Maya sends PAYMENT_SUCCESS to our Edge Function.
+ * The Edge Function verifies the payment with Maya
+ * and updates vending_transactions.payment_status.
+ *
+ * This listener watches that transaction so the
+ * simulator can continue automatically without the
+ * customer pressing a verification button.
+ */
+useEffect(() => {
+  const transactionId = mayaCheckout?.transaction_id;
+
+  if (!transactionId || purchaseResult) {
+    return undefined;
+  }
+
+  let active = true;
+
+  const authorizePaidTransaction = (transaction) => {
+    if (!active || transaction?.payment_status !== "paid") {
+      return;
+    }
+
+    setPurchaseResult({
+      id: transaction.id,
+      transaction_id: transaction.id,
+      transaction_code: transaction.transaction_code,
+      payment_status: transaction.payment_status,
+      dispense_status:
+        transaction.dispense_status ?? "not_started",
+      provider_verified: true,
+      simulated: false,
+    });
+
+    setPaymentMethod("maya_checkout");
+
+    setCheckoutStatusMessage(
+      "Maya payment confirmed automatically. Ready to dispense."
+    );
+
+    setCheckoutError("");
+  };
+
+  /*
+   * Check the database immediately.
+   *
+   * This handles the case where Maya's webhook was
+   * processed before the Realtime subscription became
+   * active.
+   */
+  const checkCurrentPaymentStatus = async () => {
+    const { data, error } = await supabase
+      .from("vending_transactions")
+      .select(`
+        id,
+        transaction_code,
+        payment_status,
+        dispense_status
+      `)
+      .eq("id", transactionId)
+      .single();
+
+    if (!active) {
+      return;
+    }
+
+    if (error) {
+      console.error(
+        "Unable to check automatic Maya payment status:",
+        error
+      );
+
+      return;
+    }
+
+    authorizePaidTransaction(data);
+  };
+
+  checkCurrentPaymentStatus();
+
+  /*
+   * Listen for the webhook's database update.
+   */
+  const channel = supabase
+    .channel(`maya-payment-${transactionId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "vending_transactions",
+        filter: `id=eq.${transactionId}`,
+      },
+      (payload) => {
+        authorizePaidTransaction(payload.new);
+      }
+    )
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        setCheckoutStatusMessage(
+          "Waiting for automatic Maya payment confirmation..."
+        );
+      }
+    });
+
+  return () => {
+    active = false;
+
+    supabase.removeChannel(channel);
+  };
+}, [mayaCheckout?.transaction_id, purchaseResult]);
+
   /*
    * ------------------------------------------------
    * REAL MAYA QR
@@ -1569,13 +1685,13 @@ const handleVerifyMayaCheckout = async () => {
                         )}
 
                         {checkingCheckout
-                          ? "Verifying with Maya..."
-                          : "Verify Maya Payment"}
+                        ? "Checking with Maya..."
+                        : "Check Payment Status"}
                       </button>
 
                       <p className="mt-3 text-center text-xs text-slate-500">
-                        SmartVend verifies the payment directly with
-                        Maya before dispensing.
+                        Payment confirmation is automatic through the Maya
+                        webhook. Use the button above only as a manual fallback.
                       </p>
                     </div>
                   )}
